@@ -143,19 +143,44 @@ func _test_occlusion_transparency() -> void:
 	var data: Dictionary = city_map.building_data[12]
 	var building_id := int(data["id"])
 	city_map._set_building_occluded(building_id, true)
+	city_map._update_occlusion_fades(1.0 / 60.0)
 	var visuals: Dictionary = city_map._building_visuals[building_id]
 	var upper: Node3D = visuals["upper"]
 	var outline: MeshInstance3D = visuals["outline"]
 	var geometry: Array[Node] = upper.find_children("*", "GeometryInstance3D", true, false)
 	var ghost: Material = visuals["occlusion_material"]
+	var fade_mid := float((ghost as ShaderMaterial).get_shader_parameter("fade")) if ghost is ShaderMaterial else 0.0
 	var translucent := not geometry.is_empty()
+	var tech_shader := false
+	var animated_shader := false
+	var shader_opacity := 0.0
+	var line_speed := 0.0
+	var line_density := 0.0
+	if ghost is ShaderMaterial:
+		var shader_material := ghost as ShaderMaterial
+		var shader := shader_material.shader
+		tech_shader = is_instance_valid(shader) and str(shader.resource_path).ends_with("occlusion_tech.gdshader")
+		if is_instance_valid(shader):
+			var shader_code := shader.code
+			animated_shader = shader_code.contains("TIME") and shader_code.contains("smoothstep") and shader_code.contains("scan_phase")
+		shader_opacity = float(shader_material.get_shader_parameter("opacity"))
+		line_speed = float(shader_material.get_shader_parameter("line_speed"))
+		line_density = float(shader_material.get_shader_parameter("line_density"))
 	for item: Node in geometry:
 		var override: Material = (item as GeometryInstance3D).material_override
-		translucent = translucent and override == ghost and override is StandardMaterial3D and _near((override as StandardMaterial3D).albedo_color.a, 0.32, 0.001)
+		var alpha_valid := false
+		if override is StandardMaterial3D:
+			alpha_valid = _near((override as StandardMaterial3D).albedo_color.a, 0.32, 0.001)
+		elif override is ShaderMaterial:
+			alpha_valid = _near(float((override as ShaderMaterial).get_shader_parameter("opacity")), shader_opacity, 0.001)
+		translucent = translucent and override == ghost and alpha_valid
 	_check(upper.visible and translucent and outline.visible, "A sight-blocking building remains visible as translucent geometry with a footprint outline")
+	_check(tech_shader and animated_shader and shader_opacity > 0.0 and shader_opacity < 1.0 and line_speed > 0.0 and line_density > 0.0, "Occluded buildings use a gradient shader with animated scan-line parameters")
+	_check(fade_mid > 0.0 and fade_mid < 1.0, "Occlusion enters through a smooth fade instead of an instant material swap")
 	var collision: Node = city_map._generated.get_node("Building_%02d_%s/BuildingCollision" % [building_id, data["kind"]])
 	_check(is_instance_valid(collision) and collision is StaticBody3D, "Occlusion keeps the building collision body active")
 	city_map._set_building_occluded(building_id, false)
+	await _steps(20)
 	var restored := true
 	for record: Dictionary in visuals["occlusion_records"]:
 		restored = restored and (record["node"] as GeometryInstance3D).material_override == record["material"]

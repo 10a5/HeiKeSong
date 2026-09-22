@@ -33,8 +33,10 @@ const RESIDENTIAL_MODEL = preload("res://model/居民楼.glb")
 const WET_STREET_SHADER = preload("res://materials/wet_street.gdshader")
 const RESIDENTIAL_SHADER = preload("res://materials/weathered_residential.gdshader")
 const WATER_SHADER = preload("res://materials/water_surface.gdshader")
+const OCCLUSION_SHADER = preload("res://materials/occlusion_tech.gdshader")
 const WATER_EFFECTS = preload("res://water_effects.gd")
 const OCCLUSION_TRANSPARENCY := 0.68
+const OCCLUSION_FADE_SPEED := 5.5
 
 var seed_value: int = 104729
 var land_rect := Rect2(-LAND_HALF_EXTENT, -LAND_HALF_EXTENT, LAND_HALF_EXTENT * 2.0, LAND_HALF_EXTENT * 2.0)
@@ -56,6 +58,10 @@ var _residential_bounds := AABB()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
+
+
+func _process(delta: float) -> void:
+	_update_occlusion_fades(delta)
 
 
 func generate(new_seed_value: int = 104729) -> void:
@@ -144,7 +150,8 @@ func _set_building_occluded(building_id: int, obscured: bool) -> void:
 		return
 	var visuals: Dictionary = _building_visuals[building_id]
 	# Keep the full facade in the scene, but make the sight-blocking geometry
-	# translucent. The full-size solid collision body is deliberately untouched.
+	# fade into a holographic material. The full-size solid collision body is
+	# deliberately untouched.
 	var upper: Node3D = visuals["upper"]
 	upper.visible = true
 	if not visuals.has("occlusion_records"):
@@ -152,17 +159,43 @@ func _set_building_occluded(building_id: int, obscured: bool) -> void:
 	if not visuals.has("occlusion_material"):
 		visuals["occlusion_material"] = _occlusion_material()
 	var records: Array = visuals["occlusion_records"]
-	var ghost: Material = visuals["occlusion_material"]
-	for record: Dictionary in records:
-		var geometry: GeometryInstance3D = record["node"]
-		if obscured:
+	var ghost: ShaderMaterial = visuals["occlusion_material"]
+	if obscured:
+		for record: Dictionary in records:
+			var geometry: GeometryInstance3D = record["node"]
 			geometry.material_override = ghost
 			geometry.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		else:
-			geometry.material_override = record["material"]
-			geometry.cast_shadow = record["cast_shadow"]
+		visuals["occlusion_target"] = 1.0
+		visuals["occlusion_animating"] = true
+	else:
+		# Keep the ghost override in place while it fades out, then restore each
+		# geometry's original material and shadow setting in _update_occlusion_fades.
+		visuals["occlusion_target"] = 0.0
+		visuals["occlusion_animating"] = true
 	var outline: MeshInstance3D = visuals["outline"]
-	outline.visible = obscured
+	outline.visible = obscured or float(visuals.get("occlusion_amount", 0.0)) > 0.01
+
+
+func _update_occlusion_fades(delta: float) -> void:
+	for building_id in _building_visuals:
+		var visuals: Dictionary = _building_visuals[building_id]
+		if not visuals.get("occlusion_animating", false):
+			continue
+		var current := float(visuals.get("occlusion_amount", 0.0))
+		var target := float(visuals.get("occlusion_target", 0.0))
+		var next := move_toward(current, target, delta * OCCLUSION_FADE_SPEED)
+		visuals["occlusion_amount"] = next
+		var ghost: ShaderMaterial = visuals["occlusion_material"]
+		ghost.set_shader_parameter("fade", next)
+		var outline: MeshInstance3D = visuals["outline"]
+		outline.visible = target > 0.0 or next > 0.01
+		if target <= 0.0 and next <= 0.001:
+			for record: Dictionary in visuals["occlusion_records"]:
+				var geometry: GeometryInstance3D = record["node"]
+				geometry.material_override = record["material"]
+				geometry.cast_shadow = record["cast_shadow"]
+			outline.visible = false
+			visuals["occlusion_animating"] = false
 
 
 func _capture_occlusion_materials(node: Node) -> Array[Dictionary]:
@@ -177,16 +210,22 @@ func _capture_occlusion_materials(node: Node) -> Array[Dictionary]:
 	return records
 
 
-func _occlusion_material() -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.albedo_color = Color(0.26, 0.58, 0.67, 1.0 - OCCLUSION_TRANSPARENCY)
-	material.roughness = 0.42
-	material.metallic = 0.0
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.emission_enabled = true
-	material.emission = Color("315c6d")
-	material.emission_energy_multiplier = 0.22
+func _occlusion_material() -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = OCCLUSION_SHADER
+	# Keep the same overall opacity as the previous ghost material while the
+	# shader adds a smooth vertical colour gradient, rim light and animated
+	# scan/grid lines. These uniforms are intentionally exposed so the effect
+	# can be tuned without changing the imported building meshes.
+	material.set_shader_parameter("base_color", Color(0.08, 0.32, 0.48, 1.0))
+	material.set_shader_parameter("highlight_color", Color(0.20, 0.84, 1.0, 1.0))
+	material.set_shader_parameter("line_color", Color(0.40, 0.94, 1.0, 1.0))
+	material.set_shader_parameter("opacity", 1.0 - OCCLUSION_TRANSPARENCY)
+	material.set_shader_parameter("line_speed", 0.75)
+	material.set_shader_parameter("line_density", 2.8)
+	material.set_shader_parameter("grid_density", 0.16)
+	material.set_shader_parameter("line_strength", 0.72)
+	material.set_shader_parameter("fade", 0.0)
 	return material
 
 
