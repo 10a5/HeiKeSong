@@ -32,6 +32,7 @@ func _run() -> void:
 	_check(not player.bounds_enabled and _near(player.global_position.x, -12.0) and _near(player.global_position.z, 60.0), "Player spawns in the south street with greybox bounds disabled")
 	await _test_seeded_layout()
 	await _test_city_geometry()
+	await _test_occlusion_transparency()
 	await _test_water_physics()
 	await _test_water_effects()
 	await _test_services()
@@ -136,6 +137,29 @@ func _test_city_geometry() -> void:
 	await _steps(70)
 	_release_all()
 	_check(player.global_position.z > center.z + 8.25 and player.global_position.z < center.z + 8.5, "Building facades are solid and stop the player's capsule at their real footprint")
+
+
+func _test_occlusion_transparency() -> void:
+	var data: Dictionary = city_map.building_data[12]
+	var building_id := int(data["id"])
+	city_map._set_building_occluded(building_id, true)
+	var visuals: Dictionary = city_map._building_visuals[building_id]
+	var upper: Node3D = visuals["upper"]
+	var outline: MeshInstance3D = visuals["outline"]
+	var geometry: Array[Node] = upper.find_children("*", "GeometryInstance3D", true, false)
+	var ghost: Material = visuals["occlusion_material"]
+	var translucent := not geometry.is_empty()
+	for item: Node in geometry:
+		var override: Material = (item as GeometryInstance3D).material_override
+		translucent = translucent and override == ghost and override is StandardMaterial3D and _near((override as StandardMaterial3D).albedo_color.a, 0.32, 0.001)
+	_check(upper.visible and translucent and outline.visible, "A sight-blocking building remains visible as translucent geometry with a footprint outline")
+	var collision: Node = city_map._generated.get_node("Building_%02d_%s/BuildingCollision" % [building_id, data["kind"]])
+	_check(is_instance_valid(collision) and collision is StaticBody3D, "Occlusion keeps the building collision body active")
+	city_map._set_building_occluded(building_id, false)
+	var restored := true
+	for record: Dictionary in visuals["occlusion_records"]:
+		restored = restored and (record["node"] as GeometryInstance3D).material_override == record["material"]
+	_check(restored and not outline.visible, "Restoring the camera view returns the building to full opacity")
 
 
 func _test_water_physics() -> void:

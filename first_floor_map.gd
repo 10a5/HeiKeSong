@@ -34,6 +34,7 @@ const WET_STREET_SHADER = preload("res://materials/wet_street.gdshader")
 const RESIDENTIAL_SHADER = preload("res://materials/weathered_residential.gdshader")
 const WATER_SHADER = preload("res://materials/water_surface.gdshader")
 const WATER_EFFECTS = preload("res://water_effects.gd")
+const OCCLUSION_TRANSPARENCY := 0.68
 
 var seed_value: int = 104729
 var land_rect := Rect2(-LAND_HALF_EXTENT, -LAND_HALF_EXTENT, LAND_HALF_EXTENT * 2.0, LAND_HALF_EXTENT * 2.0)
@@ -142,12 +143,51 @@ func _set_building_occluded(building_id: int, obscured: bool) -> void:
 	if not _building_visuals.has(building_id):
 		return
 	var visuals: Dictionary = _building_visuals[building_id]
-	# A visible low plinth retains the footprint, while all tall facade pieces
-	# disappear. The full-size solid collision body is deliberately untouched.
+	# Keep the full facade in the scene, but make the sight-blocking geometry
+	# translucent. The full-size solid collision body is deliberately untouched.
 	var upper: Node3D = visuals["upper"]
-	upper.visible = not obscured
+	upper.visible = true
+	if not visuals.has("occlusion_records"):
+		visuals["occlusion_records"] = _capture_occlusion_materials(upper)
+	if not visuals.has("occlusion_material"):
+		visuals["occlusion_material"] = _occlusion_material()
+	var records: Array = visuals["occlusion_records"]
+	var ghost: Material = visuals["occlusion_material"]
+	for record: Dictionary in records:
+		var geometry: GeometryInstance3D = record["node"]
+		if obscured:
+			geometry.material_override = ghost
+			geometry.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		else:
+			geometry.material_override = record["material"]
+			geometry.cast_shadow = record["cast_shadow"]
 	var outline: MeshInstance3D = visuals["outline"]
 	outline.visible = obscured
+
+
+func _capture_occlusion_materials(node: Node) -> Array[Dictionary]:
+	var records: Array[Dictionary] = []
+	for child: Node in node.find_children("*", "GeometryInstance3D", true, false):
+		var geometry := child as GeometryInstance3D
+		records.append({
+			"node": geometry,
+			"material": geometry.material_override,
+			"cast_shadow": geometry.cast_shadow,
+		})
+	return records
+
+
+func _occlusion_material() -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = Color(0.26, 0.58, 0.67, 1.0 - OCCLUSION_TRANSPARENCY)
+	material.roughness = 0.42
+	material.metallic = 0.0
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.emission_enabled = true
+	material.emission = Color("315c6d")
+	material.emission_energy_multiplier = 0.22
+	return material
 
 
 func _create_materials() -> void:
