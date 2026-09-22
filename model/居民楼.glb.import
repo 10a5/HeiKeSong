@@ -4,12 +4,12 @@ importer="scene"
 importer_version=1
 type="PackedScene"
 uid="uid://bsoavg8qkj6bc"
-path="res://.godot/imported/居民楼.glb-d7efcfbc949c465852460a59ab9c6504.scn"
+path="res://.godot/imported/居民楼.glb-9019d5597583dc4ca3fe4d40fbbf9233.scn"
 
 [deps]
 
-source_file="res://居民楼.glb"
-dest_files=["res://.godot/imported/居民楼.glb-d7efcfbc949c465852460a59ab9c6504.scn"]
+source_file="res://model/居民楼.glb"
+dest_files=["res://.godot/imported/居民楼.glb-9019d5597583dc4ca3fe4d40fbbf9233.scn"]
 
 [params]
 

@@ -29,7 +29,7 @@ const KIND_ACCENTS := {
 	"office": Color("bba2ef"), "medical": Color("74edba"), "police": Color("79baff"),
 }
 const LABEL_FONT = preload("res://assets/fonts/NotoSansSC-Regular.ttf")
-const RESIDENTIAL_MODEL = preload("res://居民楼.glb")
+const RESIDENTIAL_MODEL = preload("res://model/居民楼.glb")
 const WET_STREET_SHADER = preload("res://materials/wet_street.gdshader")
 const RESIDENTIAL_SHADER = preload("res://materials/weathered_residential.gdshader")
 const WATER_SHADER = preload("res://materials/water_surface.gdshader")
