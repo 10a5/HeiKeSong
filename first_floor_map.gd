@@ -7,6 +7,9 @@ const TILE_SIZE := 2.0
 const CELL_SIZE := 12.0 * TILE_SIZE
 const STREET_WIDTH := 4.0 * TILE_SIZE
 const BUILDING_WIDTH := 8.0 * TILE_SIZE
+const RESIDENTIAL_FLOOR_HEIGHT := 3.0
+const RESIDENTIAL_FLOORS := 5
+const RESIDENTIAL_TARGET_HEIGHT := RESIDENTIAL_FLOOR_HEIGHT * RESIDENTIAL_FLOORS
 const SHALLOW_WIDTH := CELL_SIZE
 const DEEP_WIDTH := 100.0
 const WATER_HEIGHT := -0.12
@@ -326,8 +329,7 @@ func _create_building_data(rng: RandomNumberGenerator) -> void:
 			var center := Vector3(-HALF_GRID_SPAN + CELL_SIZE * 0.5 + column * CELL_SIZE, 0.0, -HALF_GRID_SPAN + CELL_SIZE * 0.5 + row * CELL_SIZE)
 			var height := rng.randf_range(6.5, 10.0) if kind == "residential" else rng.randf_range(6.0, 8.0)
 			if kind == "residential":
-				# Keep the imported building's vertical proportions relative to its
-				# longest side; the existing square parcel remains eight tiles wide.
+				# Keep the eight-tile parcel while using the shared 3m-per-floor scale.
 				height = _residential_bounds.size.y * _residential_scale().y + 0.22
 			building_data.append({
 				"id": row * GRID_SIZE + column,
@@ -414,7 +416,10 @@ func _measure_model_bounds(node: Node, parent_transform := Transform3D.IDENTITY)
 func _residential_scale() -> Vector3:
 	var scale_x := BUILDING_WIDTH / maxf(_residential_bounds.size.x, 0.001)
 	var scale_z := BUILDING_WIDTH / maxf(_residential_bounds.size.z, 0.001)
-	return Vector3(scale_x, minf(scale_x, scale_z), scale_z)
+	# Fit the footprint independently, then calibrate vertical scale to the
+	# same three-metre storey used by the player and the rest of the district.
+	var scale_y := RESIDENTIAL_TARGET_HEIGHT / maxf(_residential_bounds.size.y, 0.001)
+	return Vector3(scale_x, scale_y, scale_z)
 
 
 func _add_residential_model(parent: Node3D) -> void:

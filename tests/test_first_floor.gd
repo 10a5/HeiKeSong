@@ -69,7 +69,7 @@ func _test_seeded_layout() -> void:
 		valid_grid = valid_grid and cell.x in range(5) and cell.y in range(5) and not ids.has(data["id"]) and not cells.has(cell)
 		valid_grid = valid_grid and _near(at.x, -48.0 + cell.x * 24.0) and _near(at.z, -48.0 + cell.y * 24.0)
 		var height: float = data["height"]
-		var valid_height := height > 25.0 and height < 26.0 if data["kind"] == "residential" else height >= 6.0 and height <= 8.0
+		var valid_height := height > 15.0 and height < 15.5 if data["kind"] == "residential" else height >= 6.0 and height <= 8.0
 		valid_sizes = valid_sizes and _near(float(data["width"]), 16.0) and valid_height
 		valid_doors = valid_doors and _near(door.x, at.x) and door.z > at.z + 8.0 and door.z < at.z + 12.0
 		ids[data["id"]] = true
@@ -79,7 +79,7 @@ func _test_seeded_layout() -> void:
 		else:
 			valid_grid = false
 	_check(valid_grid and ids.size() == 25 and cells.size() == 25, "Every grid cell has one unique building ID at the 24-metre pitch")
-	_check(valid_sizes, "Buildings retain 16-metre footprints; imported residences use their model height")
+	_check(valid_sizes, "Buildings retain 16-metre footprints; residences use a 3m-per-floor calibrated height")
 	_check(valid_doors, "Service doors lie outside their building footprint on the south access strip")
 	_check(counts == {"residential": 15, "shop": 3, "office": 3, "medical": 2, "police": 2}, "Every seed includes all five intended building categories")
 	_check(_near(city_map.road_width, 8.0) and _near(city_map.block_size, 24.0), "Street gaps are eight metres between 16-metre buildings")
