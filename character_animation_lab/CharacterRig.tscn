@@ -1,0 +1,29 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/character_rig.gd" id="1_rig"]
+[ext_resource type="PackedScene" path="res://assets/tactical_female_armor/tripo_convert_dd330cff-e086-44c0-a315-e15f143795f3.fbx" id="2_character"]
+
+[sub_resource type="Animation" id="Animation_reset"]
+resource_name = "RESET"
+length = 1.0
+
+[sub_resource type="Animation" id="Animation_idle_template"]
+resource_name = "idle_template"
+length = 1.0
+loop_mode = 1
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_rig"]
+_data = {
+&"RESET": SubResource("Animation_reset"),
+&"idle_template": SubResource("Animation_idle_template")
+}
+
+[node name="CharacterRig" type="Node3D"]
+script = ExtResource("1_rig")
+model_height = 1.8
+
+[node name="Character" parent="." instance=ExtResource("2_character")]
+editable_children = true
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries = {&"": SubResource("AnimationLibrary_rig")}

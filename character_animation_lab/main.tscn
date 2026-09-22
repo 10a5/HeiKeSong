@@ -1,0 +1,84 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/animation_lab.gd" id="1_lab"]
+[ext_resource type="PackedScene" path="res://CharacterRig.tscn" id="2_rig"]
+
+[sub_resource type="Environment" id="Environment_lab"]
+background_mode = 1
+background_color = Color(0.018, 0.028, 0.055, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.22, 0.32, 0.52, 1)
+ambient_light_energy = 0.8
+tonemap_mode = 2
+glow_enabled = true
+
+[sub_resource type="PlaneMesh" id="Plane_ground"]
+size = Vector2(18, 18)
+
+[sub_resource type="StandardMaterial3D" id="Material_ground"]
+albedo_color = Color(0.035, 0.07, 0.12, 1)
+metallic = 0.35
+roughness = 0.68
+
+[node name="CharacterAnimationLab" type="Node3D"]
+script = ExtResource("1_lab")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_lab")
+
+[node name="KeyLight" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-48, -28, 0)
+light_color = Color(0.74, 0.86, 1, 1)
+light_energy = 1.55
+shadow_enabled = true
+
+[node name="FillLight" type="OmniLight3D" parent="."]
+position = Vector3(-2, 4, 2)
+light_color = Color(0.2, 0.72, 1, 1)
+light_energy = 4.0
+omni_range = 10.0
+
+[node name="Ground" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.012, 0)
+mesh = SubResource("Plane_ground")
+material_override = SubResource("Material_ground")
+
+[node name="CharacterPivot" type="Node3D" parent="."]
+position = Vector3(0, 0, 0)
+
+[node name="CharacterRig" parent="CharacterPivot" instance=ExtResource("2_rig")]
+
+[node name="CameraRig" type="Node3D" parent="."]
+position = Vector3(0, 1.2, 4.2)
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+current = true
+fov = 44.0
+
+[node name="EditorOverlay" type="CanvasLayer" parent="."]
+
+[node name="Panel" type="ColorRect" parent="EditorOverlay"]
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 500.0
+offset_bottom = 205.0
+color = Color(0.015, 0.025, 0.055, 0.86)
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="EditorOverlay/Panel"]
+offset_left = 18.0
+offset_top = 12.0
+offset_right = 470.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(0.56, 0.94, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "CHARACTER ANIMATION LAB"
+
+[node name="Help" type="Label" parent="EditorOverlay/Panel"]
+offset_left = 18.0
+offset_top = 48.0
+offset_right = 470.0
+offset_bottom = 170.0
+theme_override_colors/font_color = Color(0.82, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 14
+text = "编辑器：选择 CharacterRig/Character/Armature/Skeleton3D\n在 3D 视图拖动骨骼 gizmo 调姿势，再用 AnimationPlayer\n插入关键帧。F 重置镜头 · Space 播放预览 · S 显示保存提示"
