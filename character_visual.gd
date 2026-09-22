@@ -240,27 +240,27 @@ func apply_state(state: Dictionary) -> void:
 	# flexes along Z with the shoulder; it never folds through the torso.
 	if slash_progress >= 0.0:
 		var sp := clampf(slash_progress, 0.0, 1.0)
-		var upper := _three_phase(sp, Vector3(-0.58, 0.0, 0.82), Vector3(0.62, 0.0, 1.05), Vector3(0.06, 0.0, 0.14))
-		var elbow := _three_phase(sp, Vector3(-0.48, 0.0, 0.38), Vector3(0.52, 0.0, 0.62), Vector3(0.04, 0.0, 0.12))
-		var torso := _three_phase(sp, Vector3(0.0, -0.08, 0.06), Vector3(0.0, 0.10, 0.04), Vector3.ZERO)
+		var upper := _three_phase(sp, Vector3(-0.82, 0.0, -0.72), Vector3(0.36, 0.0, -0.95), Vector3(0.06, 0.0, -0.10))
+		var elbow := _three_phase(sp, Vector3(-0.42, 0.0, -0.35), Vector3(0.34, 0.0, -0.48), Vector3(0.04, 0.0, -0.08))
+		var torso := _three_phase(sp, Vector3(0.0, -0.08, -0.05), Vector3(0.0, 0.10, -0.08), Vector3.ZERO)
 		if attack_kind == "punch":
-			upper = _three_phase(sp, Vector3(-0.18, 0.0, 0.10), Vector3(0.18, 0.0, 1.45), Vector3.ZERO)
-			elbow = _three_phase(sp, Vector3(-0.18, 0.0, 0.18), Vector3(0.20, 0.0, 0.78), Vector3.ZERO)
+			upper = _three_phase(sp, Vector3(-0.24, 0.0, -0.10), Vector3(0.22, 0.0, -1.35), Vector3.ZERO)
+			elbow = _three_phase(sp, Vector3(-0.20, 0.0, -0.18), Vector3(0.24, 0.0, -0.72), Vector3.ZERO)
 		elif attack_kind == "shot":
-			upper = Vector3(-0.04, 0.0, 1.20)
-			elbow = Vector3(0.0, 0.0, 0.70)
+			upper = Vector3(-0.04, 0.0, -1.15)
+			elbow = Vector3(0.0, 0.0, -0.65)
 		elif attack_kind == "charged_slash":
-			upper = _three_phase(sp, Vector3(-0.72, 0.0, 1.00), Vector3(0.70, 0.0, 1.20), Vector3(0.02, 0.0, 0.10))
+			upper = _three_phase(sp, Vector3(-0.90, 0.0, -0.95), Vector3(0.42, 0.0, -1.10), Vector3(0.02, 0.0, -0.08))
 		_add_delta(target, "mixamorig_RightArm", upper, 1.0)
 		_add_delta(target, "mixamorig_RightForeArm", elbow, 1.0)
-		_add_delta(target, "mixamorig_RightHand", Vector3(0.0, 0.0, 0.08 * sin(sp * PI)), 1.0)
+		_add_delta(target, "mixamorig_RightHand", Vector3(0.0, 0.0, -0.08 * sin(sp * PI)), 1.0)
 		_add_delta(target, "mixamorig_Spine2", torso, 1.0)
-		_add_delta(target, "mixamorig_LeftArm", Vector3(0.04, 0.0, 0.32 * sin(sp * PI)), 1.0)
-		_add_delta(target, "mixamorig_LeftForeArm", Vector3(0.0, 0.0, 0.45 * sin(sp * PI)), 1.0)
+		_add_delta(target, "mixamorig_LeftArm", Vector3(0.04, 0.0, -0.32 * sin(sp * PI)), 1.0)
+		_add_delta(target, "mixamorig_LeftForeArm", Vector3(0.0, 0.0, -0.45 * sin(sp * PI)), 1.0)
 
 	if charge_amount > 0.0:
-		_add_delta(target, "mixamorig_RightArm", Vector3(-0.20, 0.0, 1.9) * charge_amount, 1.0)
-		_add_delta(target, "mixamorig_RightForeArm", Vector3(0.0, 0.0, 0.80) * charge_amount, 1.0)
+		_add_delta(target, "mixamorig_RightArm", Vector3(-0.20, 0.0, -1.9) * charge_amount, 1.0)
+		_add_delta(target, "mixamorig_RightForeArm", Vector3(0.0, 0.0, -0.80) * charge_amount, 1.0)
 	if diving:
 		_add_delta(target, "mixamorig_Spine", Vector3(0.0, 0.0, -0.25), 1.0)
 		_add_delta(target, "mixamorig_Spine1", Vector3(0.0, 0.0, -0.20), 1.0)
