@@ -12,6 +12,7 @@ signal defeated()
 
 const COMBAT = preload("res://combat_hit.gd")
 const CARD_CATALOG = preload("res://card_catalog.gd")
+const CHARACTER_VISUAL = preload("res://character_visual.gd")
 const ROLL_ATTACKS: Array[String] = ["punch", "slash", "shot"]
 
 @export var move_speed: float = 5.5
@@ -116,6 +117,7 @@ var _life_time: float = 0.0
 var _walk_phase: float = 0.0
 var _heading: Node3D
 var _body_pivot: Node3D
+var _character_visual: Node3D
 var _left_arm: Node3D
 var _right_arm: Node3D
 var _left_leg: Node3D
@@ -751,6 +753,27 @@ func _update_model(input_direction: Vector3) -> void:
 	var walking := input_direction.length() > 0.01 and horizontal_speed > 0.05 and not is_action_locked() and not airborne
 	var stride_strength := clampf(horizontal_speed / maxf(move_speed, 0.001), 0.0, 1.0)
 	var stride := sin(_walk_phase) * 0.5 * stride_strength if walking else 0.0
+	var roll_progress := 1.0 - roll_time_left / maxf(roll_duration, 0.001) if is_rolling else -1.0
+	var dash_progress := 1.0 - dash_time_left / maxf(dash_duration, 0.001) if is_dashing else -1.0
+	var slash_progress := 1.0 - slash_time_left / maxf(_active_slash_duration, 0.001) if slash_time_left > 0.0 else -1.0
+	var charge_amount := 1.0 - charge_time_left / maxf(charged_slash_windup, 0.001) if charge_time_left > 0.0 else 0.0
+	if is_instance_valid(_character_visual) and _character_visual.has_method("apply_state"):
+		_character_visual.apply_state({
+			"time": _life_time,
+			"walk_phase": _walk_phase,
+			"move_amount": stride_strength if walking else 0.0,
+			"airborne": airborne,
+			"vertical_speed": velocity.y,
+			"roll_progress": roll_progress,
+			"dash_progress": dash_progress,
+			"slash_progress": slash_progress,
+			"attack_kind": _active_attack_kind,
+			"charge_amount": charge_amount,
+			"diving": is_diving,
+			"dead": is_dead,
+			"boost": is_cybernetic_active,
+			"damage_flash": _damage_flash_left,
+		})
 	_left_leg.rotation.x = stride
 	_right_leg.rotation.x = -stride
 	_left_arm.rotation = Vector3(-stride * 0.65, 0.0, 0.0)
@@ -771,7 +794,6 @@ func _update_model(input_direction: Vector3) -> void:
 		_right_leg.rotation.x = 0.5
 		_right_arm.rotation.x = -2.3
 	elif is_rolling:
-		var roll_progress := 1.0 - roll_time_left / roll_duration
 		_body_pivot.rotation.x = -roll_progress * TAU
 		_body_pivot.position.y = 0.8 + sin(roll_progress * PI) * 0.16
 		_left_leg.rotation.x = -0.7
@@ -839,6 +861,9 @@ func _build_model() -> void:
 	_body_pivot.name = "Model"
 	_body_pivot.position.y = 0.8
 	_heading.add_child(_body_pivot)
+	_character_visual = CHARACTER_VISUAL.new()
+	_character_visual.name = "TacticalFemaleVisual"
+	_heading.add_child(_character_visual)
 
 	_add_capsule(_body_pivot, Vector3(0.0, 0.09, 0.0), 0.27, 0.69, _body_material)
 	_add_box(_body_pivot, Vector3(0.0, 0.08, -0.25), Vector3(0.32, 0.23, 0.055), dark)
@@ -894,6 +919,9 @@ func _build_model() -> void:
 	_add_arc(1.25, slash_reach, _slash_material)
 	_add_arc(slash_reach - 0.045, slash_reach, _slash_edge_material)
 	_slash_root.visible = false
+	# Keep the old greybox joints alive for compatibility with existing visual
+	# helpers and tests, but let the imported rig be the only visible body.
+	_body_pivot.visible = false
 
 
 func _make_joint(joint_name: String, local_position: Vector3) -> Node3D:
