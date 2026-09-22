@@ -66,6 +66,7 @@ func _run() -> void:
 	_check(_near(player.movement_yaw, scene.get("camera_yaw")), "Player movement tracks the camera yaw")
 	_check_reset("Initial state")
 	await _test_costs_and_recovery()
+	await _test_arrow_key_bindings()
 	await _test_camera_inputs()
 	await _test_camera_relative_movement()
 	await _test_smooth_turning()
@@ -236,6 +237,45 @@ func _test_camera_inputs() -> void:
 	_check(scene.get("camera").global_transform.is_finite(), "Extreme zoom and pitch keep the camera transform finite")
 	scene.restart()
 	await _steps(2)
+
+
+func _test_arrow_key_bindings() -> void:
+	var expected := {
+		"move_left": KEY_LEFT,
+		"move_right": KEY_RIGHT,
+		"move_up": KEY_UP,
+		"move_down": KEY_DOWN,
+	}
+	for action: String in expected:
+		var has_arrow := false
+		for event in InputMap.action_get_events(action):
+			if event is InputEventKey and event.physical_keycode == expected[action]:
+				has_arrow = true
+		_check(has_arrow, "%s includes its matching arrow key" % action)
+	if _main_process_was_enabled:
+		scene.set_process(false)
+	_release_all()
+	player.reset_player()
+	player.movement_yaw = 0.0
+	var before := player.global_position
+	_set_physical_key(KEY_UP, true)
+	await _steps(12)
+	_set_physical_key(KEY_UP, false)
+	var arrow_delta := player.global_position - before
+	var arrow_direction := _horizontal(player.facing)
+	_check(arrow_delta.length() > 0.5 and absf(arrow_delta.z) > absf(arrow_delta.x) * 2.0, "Up arrow uses the same forward movement action as W")
+	_release_all()
+	player.reset_player()
+	player.movement_yaw = 0.0
+	before = player.global_position
+	_set_physical_key(KEY_W, true)
+	await _steps(12)
+	_set_physical_key(KEY_W, false)
+	var wasd_delta := player.global_position - before
+	var wasd_direction := _horizontal(player.facing)
+	_check(arrow_direction.is_equal_approx(wasd_direction) and arrow_delta.normalized().dot(wasd_delta.normalized()) > 0.99, "Arrow and WASD movement share the same direction basis")
+	if _main_process_was_enabled:
+		scene.set_process(true)
 
 func _test_roll_lock() -> void:
 	_release_all()
