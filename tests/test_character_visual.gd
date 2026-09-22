@@ -52,6 +52,7 @@ func _run() -> void:
 	_check(not meshes.is_empty(), "Imported character has visible skinned mesh geometry")
 	var has_humanoid_size := _has_humanoid_bounds(meshes)
 	_check(has_humanoid_size, "Imported mesh has a usable humanoid size")
+	_check(_has_floor_scale(meshes), "Imported character is approximately 1.8 metres tall")
 	var armature := _find_named_descendant(visual, "Armature") as Node3D
 	_check(armature != null, "Imported model keeps its Armature orientation node")
 	if armature != null:
@@ -113,6 +114,32 @@ func _has_humanoid_bounds(meshes: Array[Node]) -> bool:
 		return false
 	var size := max_corner - min_corner
 	return size.y > 0.6 and size.x > 0.05 and size.z > 0.05
+
+
+func _has_floor_scale(meshes: Array[Node]) -> bool:
+	if meshes.is_empty():
+		return false
+	var min_corner := Vector3(INF, INF, INF)
+	var max_corner := Vector3(-INF, -INF, -INF)
+	var found := false
+	var to_visual: Transform3D = visual.global_transform.affine_inverse()
+	for mesh_node in meshes:
+		var mesh_instance := mesh_node as MeshInstance3D
+		if mesh_instance == null or mesh_instance.mesh == null:
+			continue
+		var aabb := mesh_instance.get_aabb()
+		var mesh_to_visual: Transform3D = to_visual * mesh_instance.global_transform
+		for x in [aabb.position.x, aabb.end.x]:
+			for y in [aabb.position.y, aabb.end.y]:
+				for z in [aabb.position.z, aabb.end.z]:
+					var point: Vector3 = mesh_to_visual * Vector3(float(x), float(y), float(z))
+					min_corner = min_corner.min(point)
+					max_corner = max_corner.max(point)
+					found = true
+	if not found:
+		return false
+	var height := (max_corner - min_corner).y
+	return height > 1.72 and height < 1.88
 
 
 func _find_bone(primary: String, fallback: String) -> int:

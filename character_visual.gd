@@ -25,10 +25,12 @@ extends Node3D
 
 const CHARACTER_SCENE: PackedScene = preload("res://tactical+female+armor+3d+model/tripo_convert_dd330cff-e086-44c0-a315-e15f143795f3.fbx")
 
-@export var visual_height: float = 1.55
+## World-space height of the imported character.  The first-floor buildings
+## use a three-metre storey, so the player is authored at a human 1.8 m scale.
+@export var visual_height: float = 1.8
 @export var face_yaw: float = PI
 @export var pose_lerp_speed: float = 14.0
-@export var roll_pivot_height: float = 0.78
+@export var roll_pivot_height: float = 0.9
 @export var show_tech_blade: bool = true
 
 var model_root: Node3D
