@@ -1,0 +1,496 @@
+extends SceneTree
+## The real first-floor scene: seeded geometry, services, street fights and water.
+## Godot --headless --path . --fixed-fps 60 --script tests/test_first_floor.gd
+
+const TEST_SEED := 7331
+const STREETS: Array[float] = [-60.0, -36.0, -12.0, 12.0, 36.0, 60.0]
+const ACTIONS: Array[String] = ["move_left", "move_right", "move_up", "move_down", "hand_1", "hand_2", "hand_3", "hand_4", "jump", "cybernetic_boost", "interact"]
+const CATALOG = preload("res://card_catalog.gd")
+
+var floor_scene: Node3D
+var player: CharacterBody3D
+var deck: Node
+var city_map: Node3D
+var passed := 0
+var failed := 0
+
+
+func _initialize() -> void:
+	_run.call_deferred()
+
+
+func _run() -> void:
+	print("Testing first-floor exploration...")
+	floor_scene = load("res://floor_one.tscn").instantiate() as Node3D
+	root.add_child(floor_scene)
+	await process_frame
+	player = floor_scene.get("player") as CharacterBody3D
+	deck = floor_scene.get("deck") as Node
+	floor_scene.set_process(false)
+	await _new_floor(TEST_SEED)
+	_check(str(ProjectSettings.get_setting("application/run/main_scene")) == "res://floor_one.tscn", "The first floor is the default playable scene")
+	_check(not player.bounds_enabled and _near(player.global_position.x, -12.0) and _near(player.global_position.z, 60.0), "Player spawns in the south street with greybox bounds disabled")
+	await _test_seeded_layout()
+	await _test_city_geometry()
+	await _test_water_physics()
+	await _test_water_effects()
+	await _test_services()
+	await _test_encounters()
+	await _test_restart_and_new_floor()
+	_release_all()
+	if floor_scene.paused:
+		floor_scene.toggle_pause()
+	print("FIRST FLOOR RESULT: %d passed, %d failed" % [passed, failed])
+	quit(0 if failed == 0 else 1)
+
+
+func _test_seeded_layout() -> void:
+	var first_layout := _layout_snapshot()
+	var first_events := _office_events()
+	await _new_floor(TEST_SEED)
+	_check(first_layout == _layout_snapshot(), "A fixed seed reproduces building types, dimensions and encounter locations")
+	_check(first_events == _office_events(), "Office events are deterministic for the same map seed")
+	await _new_floor(TEST_SEED + 1)
+	_check(first_layout != _layout_snapshot(), "A different seed produces a different district layout")
+	await _new_floor(TEST_SEED)
+	var buildings: Array = city_map.building_data
+	_check(buildings.size() == 25 and floor_scene.services.size() == 25, "A 5 by 5 district contains exactly 25 building cells and service records")
+	var ids: Dictionary = {}
+	var cells: Dictionary = {}
+	var counts := {"residential": 0, "shop": 0, "office": 0, "medical": 0, "police": 0}
+	var valid_grid := true
+	var valid_sizes := true
+	var valid_doors := true
+	for data: Dictionary in buildings:
+		var cell: Vector2i = data["cell"]
+		var at: Vector3 = data["position"]
+		var door: Vector3 = data["door_position"]
+		valid_grid = valid_grid and cell.x in range(5) and cell.y in range(5) and not ids.has(data["id"]) and not cells.has(cell)
+		valid_grid = valid_grid and _near(at.x, -48.0 + cell.x * 24.0) and _near(at.z, -48.0 + cell.y * 24.0)
+		var height: float = data["height"]
+		var valid_height := height > 25.0 and height < 26.0 if data["kind"] == "residential" else height >= 6.0 and height <= 8.0
+		valid_sizes = valid_sizes and _near(float(data["width"]), 16.0) and valid_height
+		valid_doors = valid_doors and _near(door.x, at.x) and door.z > at.z + 8.0 and door.z < at.z + 12.0
+		ids[data["id"]] = true
+		cells[cell] = true
+		if counts.has(data["kind"]):
+			counts[data["kind"]] += 1
+		else:
+			valid_grid = false
+	_check(valid_grid and ids.size() == 25 and cells.size() == 25, "Every grid cell has one unique building ID at the 24-metre pitch")
+	_check(valid_sizes, "Buildings retain 16-metre footprints; imported residences use their model height")
+	_check(valid_doors, "Service doors lie outside their building footprint on the south access strip")
+	_check(counts == {"residential": 15, "shop": 3, "office": 3, "medical": 2, "police": 2}, "Every seed includes all five intended building categories")
+	_check(_near(city_map.road_width, 8.0) and _near(city_map.block_size, 24.0), "Street gaps are eight metres between 16-metre buildings")
+	_check(city_map.land_rect == Rect2(-64.0, -64.0, 128.0, 128.0), "Land extends to plus or minus 64 metres")
+	_check(city_map.shallow_rect == Rect2(-88.0, -88.0, 176.0, 176.0), "The shallow shelf extends 24 metres beyond every land edge")
+	_check(city_map.encounters_data.size() == 8 and floor_scene.encounters.size() == 8, "Eight street encounters are generated")
+	var unique_encounters: Dictionary = {}
+	var valid_encounters := true
+	for data: Dictionary in city_map.encounters_data:
+		var at: Vector3 = data["position"]
+		var a: Vector3 = data["endpoint_a"]
+		var b: Vector3 = data["endpoint_b"]
+		var axis: Vector3 = data["axis"]
+		valid_encounters = valid_encounters and not unique_encounters.has(at) and _near(a.distance_to(b), 24.0) and at.is_equal_approx((a + b) * 0.5)
+		valid_encounters = valid_encounters and (axis.is_equal_approx(Vector3.RIGHT) or axis.is_equal_approx(Vector3.BACK))
+		valid_encounters = valid_encounters and (_on_street_line(at.x) or _on_street_line(at.z)) and at.distance_to(city_map.spawn_position) > 10.0
+		unique_encounters[at] = true
+	_check(valid_encounters, "Encounters occupy unique street segments and leave the initial spawn clear")
+
+
+func _test_city_geometry() -> void:
+	var all_clear := true
+	for line in STREETS:
+		all_clear = all_clear and _ray_clear(Vector3(line, 0.8, -60.0), Vector3(line, 0.8, 60.0))
+		all_clear = all_clear and _ray_clear(Vector3(-60.0, 0.8, line), Vector3(60.0, 0.8, line))
+	_check(all_clear, "All six north-south and east-west streets are physically open end to end")
+	var visited := {Vector2i(0, 0): true}
+	var queue: Array[Vector2i] = [Vector2i.ZERO]
+	while not queue.is_empty():
+		var cell: Vector2i = queue.pop_front()
+		for step in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var neighbour: Vector2i = cell + step
+			if neighbour.x < 0 or neighbour.x > 5 or neighbour.y < 0 or neighbour.y > 5 or visited.has(neighbour):
+				continue
+			var from := Vector3(STREETS[cell.x], 0.8, STREETS[cell.y])
+			var to := Vector3(STREETS[neighbour.x], 0.8, STREETS[neighbour.y])
+			if _ray_clear(from, to):
+				visited[neighbour] = true
+				queue.append(neighbour)
+	_check(visited.size() == 36, "Actual collision geometry connects all 36 street intersections")
+	await _park(Vector3(-12.0, 0.0, 60.0))
+	Input.action_press("move_up")
+	await _steps(120)
+	_release_all()
+	_check(player.is_on_floor() and player.global_position.z < 49.5 and _near(player.global_position.x, -12.0, 0.03), "The player can walk along the north-south street without snagging buildings")
+	await _park(Vector3(-12.0, 0.0, 60.0))
+	Input.action_press("move_right")
+	await _steps(140)
+	_release_all()
+	_check(player.is_on_floor() and player.global_position.x > -0.5 and _near(player.global_position.z, 60.0, 0.03), "The player can walk along the east-west street and cross an intersection")
+	var building: Dictionary = city_map.building_data[12]
+	var center: Vector3 = building["position"]
+	await _park(center + Vector3(0.0, 0.0, 11.0))
+	Input.action_press("move_up")
+	await _steps(70)
+	_release_all()
+	_check(player.global_position.z > center.z + 8.25 and player.global_position.z < center.z + 8.5, "Building facades are solid and stop the player's capsule at their real footprint")
+
+
+func _test_water_physics() -> void:
+	var zones_valid := true
+	for point in [Vector3(0, 0, 63), Vector3(63, 0, 0), Vector3(-63, 0, -63)]:
+		zones_valid = zones_valid and city_map.get_water_zone(point) == "land"
+	var shelf_points: Array[Vector3] = [Vector3(0, 0.5, 76), Vector3(0, 0.5, -76), Vector3(76, 0.5, 0), Vector3(-76, 0.5, 0), Vector3(76, 0.5, 76), Vector3(-76, 0.5, 76), Vector3(76, 0.5, -76), Vector3(-76, 0.5, -76)]
+	for point in shelf_points:
+		zones_valid = zones_valid and city_map.get_water_zone(point) == "shallow"
+	for point in [Vector3(0, 0, 89), Vector3(89, 0, 0), Vector3(-89, 0, -89)]:
+		zones_valid = zones_valid and city_map.get_water_zone(point) == "deep"
+	_check(zones_valid, "Water classification distinguishes land, all shelf sides and corners, and deep water")
+	for point in shelf_points:
+		await _park(point)
+		await _steps(50)
+		_check(player.is_on_floor() and not player.is_dead and player.global_position.y > -0.7 and player.global_position.y < -0.25 and floor_scene.water_zone == "shallow", "Shallow water has a real standing shelf at %s" % str(Vector2(point.x, point.z)))
+	await _park(Vector3(-12.0, 0.0, 62.0))
+	Input.action_press("move_down")
+	await _steps(100)
+	_release_all()
+	_check(floor_scene.water_zone == "shallow" and player.is_on_floor(), "Ordinary walking can enter the shallow shelf at a street end")
+	Input.action_press("move_up")
+	await _steps(150)
+	_release_all()
+	_check(floor_scene.water_zone == "land" and player.is_on_floor() and player.global_position.y > -0.05, "A shore ramp permits ordinary walking back to land without jumping")
+	await _park(Vector3(0.0, 0.1, 92.0))
+	await _steps(15)
+	_check(not player.is_on_floor() and player.global_position.y < -0.3 and floor_scene.water_zone == "deep", "Deep water has no floor and the character genuinely sinks")
+	var depth := player.global_position.y
+	var velocity_before := player.velocity
+	floor_scene.toggle_pause()
+	await _steps(30)
+	_check(_near(player.global_position.y, depth) and player.velocity.is_equal_approx(velocity_before) and not floor_scene.lost_in_water, "Pause freezes sinking and prevents a hidden loss transition")
+	floor_scene.toggle_pause()
+	await _steps(55)
+	_check(floor_scene.lost_in_water and player.is_dead and player.global_position.y < -2.4, "Sinking below the deep-water threshold causes cognitive loss")
+	_send_key(KEY_R)
+	await _steps(3)
+	_sync_map()
+	_freeze_encounters()
+	_check(not floor_scene.lost_in_water and not player.is_dead and floor_scene.water_zone == "land" and player.global_position.distance_to(city_map.spawn_position) < 0.1, "R recovers from deep-water loss at the same district's safe spawn")
+	await _park(Vector3(0.0, -2.2, 92.0))
+	player.velocity.y = -10.0
+	_check(player.request_card("roll"), "A roll can still begin while sinking before the loss threshold")
+	_check(not player.take_damage(20.0), "The test roll has its normal combat evasion window")
+	await _steps(5)
+	_check(floor_scene.lost_in_water and player.is_dead, "Combat roll invulnerability cannot bypass deep-water loss")
+	await _new_floor(TEST_SEED)
+
+
+func _test_water_effects() -> void:
+	await _park(Vector3(0.0, 0.5, 76.0))
+	await _steps(190)
+	_check(_active_ripple_count() == 0, "Standing in water lets the initial contact ripple expire")
+	Input.action_press("move_right")
+	await _steps(45)
+	_release_all()
+	var effects: Node = city_map.water_effects
+	_check(player.is_on_floor() and floor_scene.water_zone == "shallow" and _active_ripple_count() >= 3, "Walking through the real shallow shelf leaves successive water ripples")
+	_check(effects.material.get_shader_parameter("ripple_data") == effects.ripples, "The water material receives the active movement ripples")
+	var frozen_time: float = effects.wave_time
+	var frozen_ripples: PackedVector4Array = effects.ripples.duplicate()
+	floor_scene.toggle_pause()
+	await _steps(30)
+	_check(effects.wave_time == frozen_time and effects.ripples == frozen_ripples, "Pause freezes both the water animation clock and every ripple age")
+	floor_scene.toggle_pause()
+	await _steps(12)
+	await _steps(133)
+	_check(_active_ripple_count() == 0 and effects.wave_time > frozen_time, "After movement stops, ripples expire within 2.2 seconds while background waves resume")
+	player.request_jump()
+	await _steps(6)
+	Input.action_press("move_right")
+	await _steps(14)
+	_release_all()
+	_check(not player.is_on_floor() and player.global_position.y > 0.2 and _active_ripple_count() == 0, "Moving above the water during a real jump does not leave surface footsteps")
+	await _steps(35)
+	_check(player.is_on_floor() and _active_ripple_count() > 0, "Landing back into shallow water produces a fresh contact ripple")
+	_send_key(KEY_R)
+	await _steps(3)
+	_sync_map()
+	_freeze_encounters()
+	_check(floor_scene.water_zone == "land" and _active_ripple_count() == 0, "Retry clears the previous district's live water ripples")
+	Input.action_press("move_right")
+	await _steps(40)
+	_release_all()
+	_check(floor_scene.water_zone == "land" and _active_ripple_count() == 0, "Ordinary walking on the street produces no water ripples")
+	await _park(Vector3(0.0, 0.5, 76.0))
+	await _steps(45)
+	_check(_active_ripple_count() > 0, "The actor is followed by water effects after retrying")
+	await _new_floor(TEST_SEED)
+	_check(floor_scene.water_zone == "land" and _active_ripple_count() == 0, "Generating another district clears all previous water ripples")
+
+
+func _active_ripple_count() -> int:
+	var active := 0
+	for ripple: Vector4 in city_map.water_effects.ripples:
+		if ripple.w > 0.0:
+			active += 1
+	return active
+
+
+func _test_services() -> void:
+	var shop := _service("shop")
+	var medical := _service("medical")
+	var police := _service("police")
+	var office := _service("office")
+	var residential := _service("residential")
+	_check(shop != null and medical != null and police != null and office != null and residential != null, "Every building interaction type is present in the actual scene")
+	_check(floor_scene.credits == 40 and not floor_scene.try_interact(), "The run begins with 40 credit and cannot activate remote buildings")
+	await _park(shop.global_position)
+	_check(shop.can_interact(), "The shop service marker is reachable from its street")
+	var total_before: int = deck.total_cards
+	var hand_before: Array = deck.hand.duplicate(true)
+	floor_scene.toggle_pause()
+	_check(not floor_scene.try_interact() and floor_scene.credits == 40, "Paused building interaction cannot spend credit")
+	floor_scene.toggle_pause()
+	floor_scene.open_card_browser(&"all")
+	_check(not floor_scene.try_interact(), "An open deck browser prevents building interaction")
+	floor_scene.close_card_browser()
+	player.global_position.y += 4.0
+	_check(not floor_scene.try_interact(), "A player high above a door cannot use its service")
+	player.global_position = shop.global_position
+	await _steps(2)
+	await _press_interact()
+	_check(floor_scene.credits == 20 and deck.total_cards == total_before + 1 and deck.hand == hand_before, "Physical E at the shop spends 20 credit and adds one card without replacing the hand")
+	await _press_interact()
+	_check(floor_scene.credits == 0 and deck.total_cards == total_before + 2, "The shop supports a second paid purchase")
+	var no_money_snapshot: Array = deck.get_card_snapshot()
+	await _press_interact()
+	_check(floor_scene.credits == 0 and deck.get_card_snapshot() == no_money_snapshot, "Insufficient credit cannot consume money or create a card")
+	await _park(medical.global_position)
+	await _press_interact()
+	_check(not medical.used and _near(player.health, player.max_health), "Full health preserves the one-use medical supply")
+	player.take_damage(60.0)
+	await _press_interact()
+	_check(medical.used and _near(player.health, 80.0) and floor_scene.credits == 0, "Medical interaction restores 40 health once without spending credit")
+	player.take_damage(20.0)
+	await _press_interact()
+	_check(_near(player.health, 60.0), "An exhausted medical station cannot heal again")
+	await _park(police.global_position)
+	total_before = deck.total_cards
+	await _press_interact()
+	_check(police.used and floor_scene.credits == 20 and deck.total_cards == total_before + 1, "Police equipment awards one card and 20 credit")
+	await _press_interact()
+	_check(floor_scene.credits == 20 and deck.total_cards == total_before + 1, "The police cache cannot be claimed twice")
+	await _park(office.global_position)
+	player.energy = 2.0
+	var credits_before: int = floor_scene.credits
+	total_before = deck.total_cards
+	await _press_interact()
+	var event_correct := false
+	match int(office.event_index):
+		0: event_correct = floor_scene.credits == credits_before + 15 and deck.total_cards == total_before
+		1: event_correct = _near(player.energy, player.max_energy) and floor_scene.credits == credits_before
+		2: event_correct = deck.total_cards == total_before + 1 and floor_scene.credits == credits_before
+	_check(office.used and event_correct, "Office E interaction resolves its seeded credit, energy or memory event")
+	credits_before = floor_scene.credits
+	total_before = deck.total_cards
+	await _press_interact()
+	_check(floor_scene.credits == credits_before and deck.total_cards == total_before, "The same office event cannot award resources twice")
+	await _park(residential.global_position)
+	_check(not floor_scene.try_interact(), "Residential blocks remain scenery without an unintended reward")
+	for kind in CATALOG.kinds():
+		deck.unlock_kind(kind)
+	await _park(shop.global_position)
+	floor_scene.credits = 20
+	await _press_interact()
+	_check(floor_scene.credits == 20 and deck.total_cards == 17, "A completed collection and full energy leave shop credit untouched")
+	player.energy = 1.0
+	await _press_interact()
+	_check(floor_scene.credits == 10 and _near(player.energy, player.max_energy) and deck.total_cards == 17, "After every card is restored, the shop sells one energy refill for ten credit")
+	_check(_deck_valid(), "Exploration rewards preserve unique physical card IDs and zone conservation")
+
+
+func _test_encounters() -> void:
+	await _new_floor(TEST_SEED)
+	var all_dormant := true
+	for encounter in floor_scene.encounters:
+		all_dormant = all_dormant and str(encounter.state) == "dormant"
+	_check(all_dormant, "Every street encounter is dormant at a fresh spawn")
+	var tested := 0
+	for encounter in floor_scene.encounters:
+		await _park(encounter.global_position)
+		encounter.set_physics_process(true)
+		if tested == 0:
+			floor_scene.toggle_pause()
+			await _steps(10)
+			_check(str(encounter.state) == "dormant", "Paused proximity cannot activate a street encounter")
+			floor_scene.toggle_pause()
+		await _steps(3)
+		_check(str(encounter.state) == "active", "Entering street segment %d activates its encounter once" % tested)
+		var foes := _encounter_foes(encounter)
+		_check(not foes.is_empty(), "Encounter %d creates real combat targets" % tested)
+		for foe in foes:
+			foe.set_physics_process(false)
+		var credits_before: int = floor_scene.credits
+		for foe in foes:
+			foe.take_damage(10000.0)
+		await _steps(3)
+		_check(str(encounter.state) == "cleared" and floor_scene.credits == credits_before + 15, "Clearing encounter %d awards exactly 15 credit" % tested)
+		for foe in foes:
+			if is_instance_valid(foe):
+				foe.take_damage(10000.0)
+		await _steps(12)
+		_check(str(encounter.state) == "cleared" and floor_scene.credits == credits_before + 15, "A cleared segment %d cannot respawn or award credit repeatedly" % tested)
+		tested += 1
+	_check(tested == 8 and floor_scene.credits == 160, "Clearing all eight encounters produces 120 credit over the initial 40")
+	_check(floor_scene.cleared_encounters() == 8, "The floor exposes all eight completed encounters to its UI")
+
+
+func _test_restart_and_new_floor() -> void:
+	var previous_seed: int = floor_scene.map_seed
+	var layout_before := _layout_snapshot()
+	var cards_before: int = deck.total_cards
+	var offices_before := _office_events()
+	_send_key(KEY_R)
+	await _steps(3)
+	_sync_map()
+	_freeze_encounters()
+	_check(floor_scene.map_seed == previous_seed and _layout_snapshot() == layout_before, "R retries the same seeded district")
+	_check(_office_events() == offices_before and floor_scene.credits == 40, "Retry resets credit while preserving seeded office outcomes")
+	_check(deck.total_cards == cards_before and _deck_valid(), "Retry preserves discovered actions and reconstructs their physical cards")
+	var state_reset := true
+	for service in floor_scene.services:
+		state_reset = state_reset and not service.used
+	for encounter in floor_scene.encounters:
+		state_reset = state_reset and str(encounter.state) == "dormant"
+	_check(state_reset and floor_scene.cleared_encounters() == 0, "Retry restores service supplies and all eight dormant encounters")
+	_check(player.global_position.distance_to(city_map.spawn_position) < 0.1 and _near(player.health, player.max_health), "Retry restores the player at the safe spawn with full health")
+	floor_scene.regenerate_floor()
+	await _steps(3)
+	_sync_map()
+	_freeze_encounters()
+	_check(floor_scene.map_seed != previous_seed and _layout_snapshot() != layout_before, "Requesting a new floor chooses a different seed and layout")
+	_check(deck.total_cards == cards_before and _deck_valid(), "A new district preserves the session's discovered card collection")
+
+
+func _new_floor(seed_value: int) -> void:
+	_release_all()
+	floor_scene.regenerate_floor(seed_value)
+	await _steps(3)
+	_sync_map()
+	_freeze_encounters()
+	player.movement_yaw = 0.0
+
+
+func _sync_map() -> void:
+	city_map = floor_scene.get("city_map") as Node3D
+	player = floor_scene.get("player") as CharacterBody3D
+	deck = floor_scene.get("deck") as Node
+
+
+func _freeze_encounters() -> void:
+	for encounter in floor_scene.encounters:
+		encounter.set_physics_process(false)
+		for foe in _encounter_foes(encounter):
+			foe.set_physics_process(false)
+
+
+func _park(location: Vector3) -> void:
+	_release_all()
+	if floor_scene.paused:
+		floor_scene.toggle_pause()
+	player.reset_player()
+	player.global_position = location
+	player.velocity = Vector3.ZERO
+	player.movement_yaw = 0.0
+	await _steps(2)
+
+
+func _service(kind: String) -> Node3D:
+	for service in floor_scene.services:
+		if str(service.kind) == kind:
+			return service
+	return null
+
+
+func _encounter_foes(encounter: Node) -> Array[CharacterBody3D]:
+	var result: Array[CharacterBody3D] = []
+	for target in get_nodes_in_group("combat_targets"):
+		if target is CharacterBody3D and encounter.is_ancestor_of(target):
+			result.append(target)
+	return result
+
+
+func _layout_snapshot() -> Dictionary:
+	return {"buildings": city_map.building_data.duplicate(true), "encounters": city_map.encounters_data.duplicate(true)}
+
+
+func _office_events() -> Dictionary:
+	var events: Dictionary = {}
+	for service in floor_scene.services:
+		if str(service.kind) == "office":
+			events[service.building_id] = service.event_index
+	return events
+
+
+func _ray_clear(from: Vector3, to: Vector3) -> bool:
+	var query := PhysicsRayQueryParameters3D.create(from, to, 1)
+	return player.get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+
+
+func _on_street_line(value: float) -> bool:
+	for line in STREETS:
+		if _near(value, line):
+			return true
+	return false
+
+
+func _deck_valid() -> bool:
+	var seen: Dictionary = {}
+	for zone in [deck.hand, deck.draw_pile, deck.discard_pile]:
+		for card in zone:
+			if card.is_empty():
+				continue
+			if seen.has(card["id"]) or not deck.is_kind_unlocked(card["kind"]):
+				return false
+			seen[card["id"]] = true
+	return seen.size() == deck.total_cards
+
+
+func _press_interact() -> void:
+	Input.action_press("interact")
+	await _steps(2)
+	Input.action_release("interact")
+	await _steps(1)
+
+
+func _send_key(keycode: Key) -> void:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	event.physical_keycode = keycode
+	event.pressed = true
+	Input.parse_input_event(event)
+
+
+func _steps(count: int) -> void:
+	for _index in range(count):
+		await physics_frame
+		await process_frame
+
+
+func _release_all() -> void:
+	for action in ACTIONS:
+		Input.action_release(action)
+
+
+func _near(a: float, b: float, tolerance: float = 0.01) -> bool:
+	return absf(a - b) <= tolerance
+
+
+func _check(condition: bool, description: String) -> void:
+	if condition:
+		passed += 1
+		print("PASS: " + description)
+	else:
+		failed += 1
+		push_error("FAIL: " + description)

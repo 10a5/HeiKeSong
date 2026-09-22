@@ -1,0 +1,72 @@
+; 神经断层 · 3D 灰盒动作卡牌 Demo. Open this file with Godot 4.3+.
+config_version=5
+
+[application]
+config/name="神经断层 · 第一层水岸街区"
+run/main_scene="res://floor_one.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[display]
+window/size/viewport_width=960
+window/size/viewport_height=540
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/size/min_width=960
+window/size/min_height=540
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[input]
+move_left={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":65)]
+}
+move_right={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":68)]
+}
+move_up={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":87)]
+}
+move_down={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":83)]
+}
+hand_1={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":49)]
+}
+hand_2={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":50)]
+}
+hand_3={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":51)]
+}
+hand_4={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":52)]
+}
+cybernetic_boost={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":81)]
+}
+jump={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":32)]
+}
+interact={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":69)]
+}
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.027, 0.063, 0.098, 1)
+textures/default_filters/use_nearest_mipmap_filter=false
+anti_aliasing/quality/msaa_3d=2
+lights_and_shadows/directional_shadow/size=4096

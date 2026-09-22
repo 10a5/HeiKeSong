@@ -1,0 +1,29 @@
+# Godot 4 import cache and editor-local state.
+.godot/
+*.shader_cache
+# Keep *.import and *.uid: they contain shared import settings and resource IDs.
+
+# macOS metadata.
+.DS_Store
+._*
+
+# Local exports and generated reports.
+/build/
+/builds/
+/exports/
+/test-results/
+*.log
+
+# Editor temporary files and Blender backup copies (keep original assets).
+*.swp
+*.swo
+*~
+*.tmp
+*.blend1
+*.blend2
+
+# Local environment settings; sanitized examples may be committed.
+.env
+.env.*
+!.env.example
+!.env.sample
