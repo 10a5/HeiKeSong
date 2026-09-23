@@ -64,6 +64,11 @@ const ACTION_ANIMATION_STATES: Array[String] = [
 ## The authored roundhouse clip plays twice as fast while its gameplay lock
 ## remains independent from the short damage window.
 @export_range(1.0, 4.0, 0.1) var front_kick_animation_speed_multiplier: float = 2.0
+## Some actors reuse the authored roundhouse clip for a sweep card.  Keep the
+## default false so the player can retain the dedicated/generated sweep pose,
+## while Boss actors can opt into the same readable kick motion without
+## changing sweep damage, reach, or gameplay timing.
+@export var sweep_uses_front_kick_animation: bool = false
 ## The imported jump clip begins with a short run-up. Start playback at this
 ## offset so the visible action begins at takeoff while player physics stays
 ## unchanged. The value is clamped for shorter fallback clips.
@@ -827,9 +832,13 @@ func _animation_name_for_state(state_name: String, state: Dictionary, attack_kin
 	if state_name == "charged_slash" or charge_amount > 0.0:
 		return "charged_slash"
 	if state_name in ["slash", "punch", "sweep", "front_kick", "shot", "airborne_slash", "dive_slash"]:
+		if state_name == "sweep" and sweep_uses_front_kick_animation and _has_animation("front_kick"):
+			return "front_kick"
 		return state_name
 	if slash_progress >= 0.0:
 		if attack_kind in ["punch", "sweep", "front_kick", "shot", "charged_slash", "airborne_slash", "dive_slash"]:
+			if attack_kind == "sweep" and sweep_uses_front_kick_animation and _has_animation("front_kick"):
+				return "front_kick"
 			return attack_kind
 		return "slash"
 	if roll_progress >= 0.0 or state_name == "roll":

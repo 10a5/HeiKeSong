@@ -1,0 +1,146 @@
+{
+  "assets": 8,
+  "bridge_links": 22,
+  "buildings": [
+    {
+      "asset": "res://居民楼3.glb",
+      "collar_intersection_triangles": 2491,
+      "height": 12.0,
+      "id": 0,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://商店.glb",
+      "collar_intersection_triangles": 4283,
+      "height": 16.0,
+      "id": 1,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://工厂1.glb",
+      "collar_intersection_triangles": 3006,
+      "height": 12.0,
+      "id": 2,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼4.glb",
+      "collar_intersection_triangles": 29857,
+      "height": 16.0,
+      "id": 3,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://居民楼4k.glb",
+      "collar_intersection_triangles": 2438,
+      "height": 12.0,
+      "id": 4,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼4.glb",
+      "collar_intersection_triangles": 29857,
+      "height": 16.0,
+      "id": 5,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://医疗点.glb",
+      "collar_intersection_triangles": 39560,
+      "height": 12.0,
+      "id": 6,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼5.glb",
+      "collar_intersection_triangles": 2879,
+      "height": 16.0,
+      "id": 7,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://居民楼3.glb",
+      "collar_intersection_triangles": 2491,
+      "height": 12.0,
+      "id": 8,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼4.glb",
+      "collar_intersection_triangles": 29857,
+      "height": 16.0,
+      "id": 9,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://工厂1.glb",
+      "collar_intersection_triangles": 3006,
+      "height": 12.0,
+      "id": 10,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://商店.glb",
+      "collar_intersection_triangles": 4283,
+      "height": 16.0,
+      "id": 11,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://居民楼4k.glb",
+      "collar_intersection_triangles": 2438,
+      "height": 12.0,
+      "id": 12,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼5.glb",
+      "collar_intersection_triangles": 2879,
+      "height": 16.0,
+      "id": 13,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://居民楼2.glb",
+      "collar_intersection_triangles": 2767,
+      "height": 12.0,
+      "id": 14,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼4.glb",
+      "collar_intersection_triangles": 29857,
+      "height": 16.0,
+      "id": 15,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://医疗点.glb",
+      "collar_intersection_triangles": 39560,
+      "height": 12.0,
+      "id": 16,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼4.glb",
+      "collar_intersection_triangles": 29857,
+      "height": 16.0,
+      "id": 17,
+      "tone": "bright"
+    },
+    {
+      "asset": "res://工厂1.glb",
+      "collar_intersection_triangles": 3006,
+      "height": 12.0,
+      "id": 18,
+      "tone": "dark"
+    },
+    {
+      "asset": "res://居民楼5.glb",
+      "collar_intersection_triangles": 2879,
+      "height": 16.0,
+      "id": 19,
+      "tone": "bright"
+    }
+  ]
+}

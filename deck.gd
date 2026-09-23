@@ -7,8 +7,11 @@ signal card_drawn(card: Dictionary, slot: int)
 signal card_discarded(card: Dictionary, slot: int)
 signal reshuffled(count: int)
 signal card_unlocked(kind: String)
+signal hand_size_changed(count: int)
 
 const CATALOG = preload("res://card_catalog.gd")
+const MIN_HAND_SIZE := 4
+const MAX_HAND_SIZE := 9
 
 const STARTING_KINDS: Array[String] = [
 	"slash", "slash", "slash",
@@ -29,6 +32,10 @@ var player: CharacterBody3D
 var _rng := RandomNumberGenerator.new()
 var _playing := false
 var _unlocked_kinds: Array[String] = CATALOG.STARTING_UNLOCKS.duplicate()
+# Only exploration rewards grant a persistent base copy. Buying a previously
+# unknown action reveals it without also granting a free exploration copy.
+var _reward_kinds: Array[String] = []
+var _purchased_kinds: Array[String] = []
 var _next_card_id := STARTING_KINDS.size()
 
 
@@ -50,12 +57,63 @@ func unlock_kind(kind: String) -> bool:
 	if not CATALOG.has_kind(kind) or is_kind_unlocked(kind):
 		return false
 	_unlocked_kinds.append(kind)
+	_reward_kinds.append(kind)
 	draw_pile.append({"id": _next_card_id, "kind": kind})
 	_next_card_id += 1
 	total_cards += 1
 	card_unlocked.emit(kind)
 	piles_changed.emit()
 	return true
+
+
+func add_purchased_card(kind: String) -> bool:
+	if not CATALOG.has_kind(kind):
+		return false
+	_purchased_kinds.append(kind)
+	draw_pile.append({"id": _next_card_id, "kind": kind})
+	_next_card_id += 1
+	total_cards += 1
+	if not is_kind_unlocked(kind):
+		_unlocked_kinds.append(kind)
+		card_unlocked.emit(kind)
+	piles_changed.emit()
+	return true
+
+
+func clear_purchased_cards() -> void:
+	# Call before reset_deck() when beginning a new run. Knowledge persists, but
+	# purchased cards do not silently become permanent free cards on restart.
+	_purchased_kinds.clear()
+
+
+func add_reward_card(kind: String) -> bool:
+	# Loot grants one run-local physical copy, including already known actions.
+	# It follows purchased-card reset rules, not persistent terminal unlocks.
+	return add_purchased_card(kind)
+
+
+func set_hand_size(count: int) -> void:
+	var new_size := clampi(count, MIN_HAND_SIZE, MAX_HAND_SIZE)
+	if new_size == hand_size and hand.size() == new_size:
+		return
+	var previous_size := hand.size()
+	if new_size < previous_size:
+		for slot in range(new_size, previous_size):
+			if not hand[slot].is_empty():
+				draw_pile.append(hand[slot])
+		hand.resize(new_size)
+		refill_time_left.resize(new_size)
+	else:
+		for slot in range(previous_size, new_size):
+			hand.append({})
+			refill_time_left.append(maxf(0.0, refill_delay))
+	hand_size = new_size
+	hand_size_changed.emit(hand_size)
+	# In a paused shop the slots keep their timers and fill after returning to
+	# play. A failed draw (all cards held) is retried when any card is available.
+	for slot in range(previous_size, hand_size):
+		draw_to_slot(slot)
+	piles_changed.emit()
 
 
 func get_catalog_snapshot() -> Array[Dictionary]:
@@ -110,10 +168,9 @@ func reset_deck(seed_value: int = -1) -> void:
 	for index in range(STARTING_KINDS.size()):
 		draw_pile.append({"id": index, "kind": STARTING_KINDS[index]})
 	_next_card_id = STARTING_KINDS.size()
-	for kind in _unlocked_kinds:
-		if kind not in CATALOG.STARTING_UNLOCKS:
-			draw_pile.append({"id": _next_card_id, "kind": kind})
-			_next_card_id += 1
+	for kind in _reward_kinds + _purchased_kinds:
+		draw_pile.append({"id": _next_card_id, "kind": kind})
+		_next_card_id += 1
 	total_cards = draw_pile.size()
 	for slot in range(hand_size):
 		draw_to_slot(slot)
@@ -122,10 +179,12 @@ func reset_deck(seed_value: int = -1) -> void:
 
 func _physics_process(delta: float) -> void:
 	for slot in range(hand_size):
+		if not hand[slot].is_empty():
+			continue
 		if refill_time_left[slot] > 0.0:
 			refill_time_left[slot] = maxf(0.0, refill_time_left[slot] - delta)
-			if refill_time_left[slot] <= 0.0:
-				draw_to_slot(slot)
+		if refill_time_left[slot] <= 0.0:
+			draw_to_slot(slot)
 
 
 func play_slot(slot: int) -> bool:

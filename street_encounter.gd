@@ -82,4 +82,8 @@ func _on_cleared() -> void:
 	state = &"cleared"
 	foe.combat_enabled = false
 	_material.albedo_color = Color("78cfb1")
-	_floor.encounter_cleared()
+	# The floor awards credits and opens the one-time Matrix reward choice.
+	# Passing this encounter lets the floor derive a stable seed for its drop.
+	# Credits settle now; the reward flow queues the modal until hit resolution
+	# is complete, including other enemies hit by this same area attack.
+	_floor.encounter_cleared(self)

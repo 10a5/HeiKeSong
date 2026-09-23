@@ -4,7 +4,7 @@ extends Node3D
 const PLAYER_SCRIPT = preload("res://player.gd")
 const DECK_SCRIPT = preload("res://deck.gd")
 const HUD_SCRIPT = preload("res://hud.gd")
-const ENEMY_SCRIPT = preload("res://enemy.gd")
+const ENEMY_SCRIPT = preload("res://mirror_boss.gd")
 const BRAIN_SCRIPT = preload("res://boss_brain.gd")
 const ADAPTER_SCRIPT = preload("res://strategy_adapter.gd")
 const OBSERVER_SCRIPT = preload("res://gameplay_observer.gd")
@@ -48,6 +48,9 @@ var _notice := ""
 var llm_context_text := ""
 var last_sent_context: Dictionary = {}
 var telemetry_label: Label
+var boss_health_bar: ProgressBar
+var boss_energy_bar: ProgressBar
+var boss_energy_label: Label
 var analysis_panel: PanelContainer
 var analysis_label: RichTextLabel
 var llm_label: RichTextLabel
@@ -129,11 +132,13 @@ func _create_actors() -> void:
 	player.spawn_position = _surface_point(0, 4)
 	player.arena_rect = Rect2(-9.5, -7.5, 19, 15)
 	add_child(player)
+	player.collision_mask |= 4
 	target = ENEMY_SCRIPT.new()
-	target.name = "MirrorTrainingEnemy"
-	target.display_name = "镜像训练对手"
+	target.name = "MirrorBoss"
+	target.display_name = "镜像 Boss"
 	target.max_health = 500
 	target.spawn_position = _surface_point(0, -0.5)
+	target.arena_rect = player.arena_rect
 	add_child(target)
 	target.setup(player)
 
@@ -159,7 +164,9 @@ func _create_deck_and_brain() -> void:
 	add_child(gameplay_observer)
 	gameplay_observer.setup(player, brain, target)
 	player.attack_observed.connect(_on_attack_observed)
-	target.dodge_observed.connect(func(): brain.record_event("dodge_success", {"attack": "enemy_slash"}))
+	target.dodge_observed.connect(func(): brain.record_event("dodge_success", {"attack": "boss_melee"}))
+	target.combo_started.connect(func(combo: StringName): brain.record_event("opponent_combo_started", {"combo": str(combo)}))
+	target.action_played.connect(func(kind: String, _cost: float): brain.record_event("opponent_action_" + kind))
 	llm_bridge = BRIDGE_SCRIPT.new()
 	llm_bridge.status_changed.connect(func(message: String): _llm_status = message)
 	llm_bridge.request_failed.connect(func(message: String): _notice = message)
@@ -296,6 +303,17 @@ func build_llm_context() -> Dictionary:
 	var context: Dictionary = brain.get_llm_context()
 	context["world_model"]["gameplay"] = gameplay_observer.summary()
 	context["world_model"]["interpretation"] = _behavior_summary(context["world_model"])
+	context["opponent"] = {
+		"controller": "fixed_combo_fsm", "state": str(target.state),
+		"health": target.health, "energy": target.energy, "shield": target.shield,
+		"entrance_invulnerable": target.is_entering, "entrance_time_left": target.entrance_time_left,
+		"preferred_distance_m": target.get_preferred_distance(),
+		"combos": [
+			{"id": "roll_punches", "actions": ["roll_forward", "slash", "slash", "roll_backward"], "cost": target.get_combo_cost(&"roll_punches")},
+			{"id": "dash_kick", "actions": ["dash_slash", "front_kick"], "cost": target.get_combo_cost(&"dash_kick")},
+		],
+		"close_defense": "shield",
+	}
 	context["limits"] = ["统计画像，非训练得到的因果世界模型", "命中与伤害来自本地真实结算", "未观察到结果不代表攻击落空", "不包含手牌、牌堆和未来随机数"]
 	return context
 
@@ -362,6 +380,7 @@ func _reset_battle() -> void:
 	_auto_clock = 0
 	_last_reaction = "observe"
 	_last_reaction_reason = ""
+	_last_enemy_state = ""
 	camera_yaw = CAMERA_YAW
 	camera_pitch = CAMERA_PITCH
 	camera_distance = CAMERA_DISTANCE
@@ -422,20 +441,38 @@ func _create_ui() -> void:
 	ui.theme = theme
 	canvas.add_child(ui)
 	var banner := VBoxContainer.new()
-	banner.position = Vector2(240, 12)
-	banner.size = Vector2(470, 78)
+	banner.position = Vector2(315, 8)
+	banner.size = Vector2(330, 82)
+	banner.add_theme_constant_override("separation", 2)
 	banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(banner)
 	telemetry_label = Label.new()
 	telemetry_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	telemetry_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	telemetry_label.add_theme_color_override("font_color", Color("bcf3e9"))
+	telemetry_label.add_theme_color_override("font_color", Color("ffd7cf"))
+	telemetry_label.add_theme_color_override("font_outline_color", Color("10151f"))
+	telemetry_label.add_theme_constant_override("outline_size", 4)
 	banner.add_child(telemetry_label)
+	boss_health_bar = _boss_bar(banner, Color("ec777e"), 8)
+	boss_energy_label = Label.new()
+	boss_energy_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	boss_energy_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	boss_energy_label.add_theme_font_size_override("font_size", 11)
+	boss_energy_label.add_theme_color_override("font_color", Color("ffdb9f"))
+	boss_energy_label.add_theme_color_override("font_outline_color", Color("10151f"))
+	boss_energy_label.add_theme_constant_override("outline_size", 4)
+	banner.add_child(boss_energy_label)
+	boss_energy_bar = _boss_bar(banner, Color("efba66"), 5)
 	var row := HBoxContainer.new()
+	row.position = Vector2(740, 92)
+	row.size = Vector2(200, 30)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	banner.add_child(row)
+	ui.add_child(row)
 	_button(row, "B  行为总结 / LLM", _toggle_analysis)
 	_button(row, "导出总结", _show_export)
+	target.health_changed.connect(func(_current: float, _maximum: float): _refresh_boss_hud())
+	target.energy_changed.connect(func(_current: float, _maximum: float): _refresh_boss_hud())
+	target.shield_changed.connect(func(_current: float): _refresh_boss_hud())
 	analysis_panel = PanelContainer.new()
 	analysis_panel.position = Vector2(115, 82)
 	analysis_panel.size = Vector2(730, 340)
@@ -477,7 +514,7 @@ func _create_ui() -> void:
 	actions.add_child(auto_send)
 	_button(actions, "关闭", _toggle_analysis)
 	var combat := CheckButton.new()
-	combat.text = "训练对手主动攻击（关闭后可练习连招）"
+	combat.text = "Boss 自动战斗（关闭后可练习连招）"
 	combat.button_pressed = true
 	combat.focus_mode = Control.FOCUS_NONE
 	combat.toggled.connect(func(enabled: bool): target.combat_enabled = enabled)
@@ -512,6 +549,46 @@ func _button(parent: Node, caption: String, callback: Callable) -> Button:
 	button.pressed.connect(callback)
 	parent.add_child(button)
 	return button
+
+
+func _boss_bar(parent: Node, color: Color, height: float) -> ProgressBar:
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size.y = height
+	bar.show_percentage = false
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color("17232ee6")
+	background.set_corner_radius_all(2)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = color
+	fill.set_corner_radius_all(2)
+	bar.add_theme_stylebox_override("background", background)
+	bar.add_theme_stylebox_override("fill", fill)
+	parent.add_child(bar)
+	return bar
+
+
+func _boss_state_name() -> String:
+	if target.is_entering:
+		return "入场护盾 · %.1f 秒" % target.entrance_time_left
+	return str({
+		"recover": "回能走位", "windup": "准备出招", "roll": "翻滚",
+		"slash": "出拳", "dash_slash": "突进出拳", "front_kick": "回旋踢",
+		"shield": "近身护盾", "dead": "已击败", "idle": "待机",
+	}.get(str(target.state), "战斗中"))
+
+
+func _refresh_boss_hud() -> void:
+	if not is_instance_valid(boss_energy_bar):
+		return
+	telemetry_label.text = "%s  %.0f / %.0f  ·  护盾 %.0f" % [target.display_name, target.health, target.max_health, target.shield]
+	if target.is_entering:
+		telemetry_label.text = "%s  %.0f / %.0f  ·  无敌" % [target.display_name, target.health, target.max_health]
+	boss_health_bar.max_value = target.max_health
+	boss_health_bar.value = target.health
+	boss_energy_bar.max_value = target.max_energy
+	boss_energy_bar.value = target.energy
+	boss_energy_label.text = "能量 %.1f / %.0f  ·  %s" % [target.energy, target.max_energy, _boss_state_name()]
 
 
 func _show_export() -> void:
@@ -550,8 +627,8 @@ func _refresh_analysis() -> void:
 	var gameplay: Dictionary = model["gameplay"]
 	var attacks: Dictionary = gameplay["attack_results"]
 	var source := "LLM 策略" if _has_llm_policy else "本地规则"
-	telemetry_label.text = "已观察 %d 次出牌  ·  %s  ·  B 查看总结" % [int(model["total_actions_seen"]), source]
-	analysis_label.text = "%s\n\n%s\n\n观察窗口内：已确认命中 %d 次 / 射击落空 %d 次，造成伤害 %.0f。\n\n本地 FSM：%s\n原因：%s\n对手只保留反应意图，仍按固定抬手节奏攻击。" % [_behavior_summary(model), str(gameplay["interpretation"]), int(attacks["hit"]), int(attacks["miss"]), float(attacks["damage"]), _last_reaction, _last_reaction_reason]
+	_refresh_boss_hud()
+	analysis_label.text = "%s\n\n%s\n\n观察窗口内：已确认命中 %d 次 / 射击落空 %d 次，造成伤害 %.0f。\n\n行为判断建议：%s\n原因：%s\nBoss 执行：%s（固定连招 AI，尚未使用行为判断建议）。" % [_behavior_summary(model), str(gameplay["interpretation"]), int(attacks["hit"]), int(attacks["miss"]), float(attacks["damage"]), _last_reaction, _last_reaction_reason, _boss_state_name()]
 	llm_label.text = "%s\n策略来源：%s\n\n%s\n\n只发送行为摘要。LLM 不决定命中、伤害、抽牌或胜负；网络等待期间角色仍可操作。" % [_llm_status, source, _llm_summary]
 	notice_label.text = _notice
 	send_button.disabled = llm_bridge.busy or not llm_bridge.is_configured()

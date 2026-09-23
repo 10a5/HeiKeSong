@@ -115,12 +115,16 @@ func _test_hit_geometry() -> void:
 
 
 func _test_dash_damage() -> void:
-	await _reset_pair(false, PLAYER_START, Vector3(0, 0, -2.2))
+	await _reset_pair(false, PLAYER_START, Vector3(0, 0, -0.6))
 	_check(player.request_card("dash_slash"), "Dash slash starts normally near an enemy")
 	await _steps(5)
-	_check(player.is_dashing and player.slash_time_left <= 0.0 and _near(enemy.health, 100.0), "The dash approach does not deal damage before its slash begins")
+	_check(player.is_dashing and player.slash_time_left <= 0.0 and _near(enemy.health, 55.0), "The dash path deals damage before the follow-up punch begins")
 	await _steps(20)
-	_check(_near(enemy.health, 55.0), "Dash slash deals exactly 45 damage over the entire action")
+	_check(_near(enemy.health, 55.0), "Dash slash damages a crossed target only once")
+	await _reset_pair(false, PLAYER_START, Vector3(0, 0, -2.2))
+	player.request_card("dash_slash")
+	await _steps(25)
+	_check(_near(enemy.health, 55.0), "Dash slash also damages a target at the endpoint")
 
 
 func _test_card_combos() -> void:
@@ -295,13 +299,17 @@ func _test_roll_timing() -> void:
 	for item in roll_directions:
 		await _reset_pair(true)
 		await _wait_state(&"windup", 90)
-		await _wait_windup_remaining(0.14)
+		# The shorter roll starts slightly earlier so lateral and forward rolls
+		# still clear the committed attack's reach.
+		await _wait_windup_remaining(0.24)
 		Input.action_press(item["key"])
 		_check(player.request_card("roll"), "A timely %s roll starts in the final telegraph window" % item["name"])
 		# Release movement so the full swing is tested at the roll's actual end
 		# position, including the active frames after invulnerability expires.
 		_release_all()
 		var completed_swing := await _wait_state(&"recovery", 60)
+		while player.is_rolling:
+			await _steps(1)
 		_check(completed_swing and not player.is_rolling and _near(player.health, 100.0), "A timely %s roll avoids the whole swing, including its trailing active frames" % item["name"])
 	await _reset_pair(true)
 	await _wait_state(&"windup", 90)
@@ -310,7 +318,9 @@ func _test_roll_timing() -> void:
 	# Releasing the key does not interrupt the locked roll; it stops subsequent walking.
 	_release_all()
 	await _steps(16)
-	_check(not player.is_rolling and enemy.state == &"windup", "An immediately spent roll expires before the enemy finishes raising its weapon")
+	_check(player.is_rolling and enemy.state == &"windup", "An early roll remains active through the first part of the telegraph")
+	while player.is_rolling:
+		await _steps(1)
 	_check(await _wait_state(&"recovery", 80), "The enemy continues its committed attack after the early roll")
 	_check(player.health <= 100.0 and player.health >= 80.0, "Rolling too early ends its invulnerability before the committed swing")
 

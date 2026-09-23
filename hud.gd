@@ -6,11 +6,13 @@ signal reset_requested()
 signal pause_requested()
 signal browser_requested(view: StringName)
 signal browser_close_requested()
+signal implants_requested()
 
 const VIEW_SIZE := Vector2(960.0, 540.0)
 const DRAW_PILE := Rect2(18.0, 230.0, 64.0, 78.0)
 const DISCARD_PILE := Rect2(878.0, 230.0, 64.0, 78.0)
 const DECK_CONTROL := Rect2(12.0, 344.0, 104.0, 28.0)
+const IMPLANTS_CONTROL := Rect2(12.0, 380.0, 104.0, 28.0)
 const RESET_CONTROL := Rect2(758.0, 500.0, 96.0, 24.0)
 const PAUSE_CONTROL := Rect2(862.0, 500.0, 80.0, 24.0)
 const CYBERNETIC_PANEL := Rect2(736.0, 14.0, 206.0, 68.0)
@@ -18,10 +20,15 @@ const CYBERNETIC_BAR := Rect2(744.0, 56.0, 190.0, 3.0)
 const ENERGY_BAR := Rect2(268.0, 529.0, 424.0, 6.0)
 const HEALTH_BAR := Rect2(20.0, 84.0, 174.0, 5.0)
 const SHIELD_BAR := Rect2(20.0, 115.0, 174.0, 5.0)
+const EROSION_BAR := Rect2(20.0, 202.0, 174.0, 5.0)
+const BOSS_PANEL := Rect2(320.0, 44.0, 320.0, 70.0)
+const BOSS_HEALTH_BAR := Rect2(328.0, 70.0, 304.0, 5.0)
+const BOSS_ENERGY_BAR := Rect2(328.0, 100.0, 304.0, 3.0)
 const CARD_SIZE := Vector2(100.0, 80.0)
 const CARD_GAP := 8.0
 const HAND_ORIGIN := Vector2(268.0, 424.0)
 const SLOT_COUNT := 4
+const MAX_SLOT_COUNT := 9
 
 const BG := Color("071019")
 const PANEL := Color("0c1b28")
@@ -37,9 +44,12 @@ const RED := Color("ff6f7f")
 const UI_FONT = preload("res://assets/fonts/NotoSansSC-Regular.ttf")
 const CARD_BROWSER = preload("res://card_browser.gd")
 const CATALOG = preload("res://card_catalog.gd")
+const MATRIX_TRANSITION = preload("res://matrix_transition.gd")
 
 var player: CharacterBody3D
 var deck: Node
+var implant_inventory: Node
+var _layout_slot_count := -1
 var current_energy := 10.0
 var max_energy := 10.0
 var current_health := 100.0
@@ -52,6 +62,7 @@ var last_action := "—"
 var last_action_time := -1.0
 var paused := false
 var card_browser: Control
+var matrix_transition: Control
 
 var _labels: Dictionary = {}
 var _pause_shade: ColorRect
@@ -63,7 +74,7 @@ var _hover_slot := -1
 var _font: FontVariation
 var _heading_font: FontVariation
 var _camera_hint := "左键拖动旋转  /  双指捏合、滚轮缩放"
-var _slot_flash: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _slot_flash: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 var _draw_flash := 0.0
 var _discard_flash := 0.0
 var _shuffle_flash := 0.0
@@ -73,6 +84,20 @@ var _flights: Array[Dictionary] = []
 var _cybernetic_time_left := 0.0
 var _cybernetic_cooldown_left := 0.0
 var _cybernetic_active := false
+var _erosion_visible := false
+var _erosion_value := 0
+var _erosion_maximum := 100
+var _erosion_in_boss := false
+var _erosion_context := ""
+var _boss_target: Node
+var _boss_health := 0.0
+var _boss_max_health := 1.0
+var _boss_energy := 0.0
+var _boss_max_energy := 1.0
+var _boss_shield := 0.0
+var _boss_entrance_time_left := 0.0
+var _boss_defeated := false
+var _boss_display_name := "镜像 Boss"
 
 
 func _ready() -> void:
@@ -158,7 +183,7 @@ func _disconnect_signal(source: Node, signal_name: StringName, callback: Callabl
 
 
 func _flashes_reset() -> void:
-	_slot_flash = [0.0, 0.0, 0.0, 0.0]
+	_slot_flash.fill(0.0)
 	_draw_flash = 0.0
 	_discard_flash = 0.0
 	_shuffle_flash = 0.0
@@ -190,6 +215,25 @@ func is_browser_open() -> bool:
 	return is_instance_valid(card_browser) and card_browser.visible
 
 
+## 播放全屏绿色数字雨转场。转场层默认隐藏，不会影响 HUD 输入。
+func play_matrix_transition(
+	fade_in_duration: float = 0.24,
+	hold_duration: float = 0.85,
+	fade_out_duration: float = 0.34
+) -> void:
+	if is_instance_valid(matrix_transition):
+		matrix_transition.play_transition(fade_in_duration, hold_duration, fade_out_duration)
+
+
+func stop_matrix_transition() -> void:
+	if is_instance_valid(matrix_transition):
+		matrix_transition.stop()
+
+
+func is_matrix_transition_playing() -> bool:
+	return is_instance_valid(matrix_transition) and matrix_transition.is_playing()
+
+
 func set_camera_hint(value: String) -> void:
 	_camera_hint = value
 	if _labels.has("camera_hint"):
@@ -212,15 +256,35 @@ func set_defeat_text(main_text: String, hint: String) -> void:
 	_labels["defeat_hint"].text = hint
 
 
+## Hidden in the training arena until the exploration controller opts in.
+func set_erosion_state(current: int, maximum: int, in_boss: bool = false, context: String = "") -> void:
+	_erosion_visible = true
+	_erosion_maximum = maxi(1, maximum)
+	_erosion_value = clampi(current, 0, _erosion_maximum)
+	_erosion_in_boss = in_boss
+	_erosion_context = context
+	_update_erosion_labels()
+	queue_redraw()
+
+
+## Pass null when leaving the arena. A freed target also hides automatically.
+func set_boss_target(target: Node) -> void:
+	_boss_target = target
+	_sync_boss_state()
+	_update_boss_labels()
+	queue_redraw()
+
+
 func _process(delta: float) -> void:
 	_sync_cybernetic_state()
+	_sync_boss_state()
 	if not paused:
 		if last_action_time >= 0.0:
 			last_action_time += delta
 			if last_action_time > 2.4:
 				last_action = "—"
 				last_action_time = -1.0
-		for slot in SLOT_COUNT:
+		for slot in _hand_slot_count():
 			_slot_flash[slot] = maxf(0.0, _slot_flash[slot] - delta)
 		_draw_flash = maxf(0.0, _draw_flash - delta)
 		_discard_flash = maxf(0.0, _discard_flash - delta)
@@ -234,7 +298,7 @@ func _process(delta: float) -> void:
 	var mouse := get_local_mouse_position()
 	_hover_slot = _slot_at(mouse)
 	var card_hovered := _hover_slot >= 0 and not _card(_hover_slot).is_empty() and not paused and not _player_defeated
-	var control_hovered := RESET_CONTROL.has_point(mouse) or PAUSE_CONTROL.has_point(mouse) or DECK_CONTROL.has_point(mouse)
+	var control_hovered := RESET_CONTROL.has_point(mouse) or PAUSE_CONTROL.has_point(mouse) or DECK_CONTROL.has_point(mouse) or IMPLANTS_CONTROL.has_point(mouse)
 	control_hovered = control_hovered or DRAW_PILE.grow(6.0).has_point(mouse) or DISCARD_PILE.grow(6.0).has_point(mouse)
 	Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if not is_browser_open() and (card_hovered or control_hovered) else Input.CURSOR_ARROW)
 	_update_dynamic_labels()
@@ -250,6 +314,19 @@ func _sync_cybernetic_state() -> void:
 	var cooldown_time = player.get("cybernetic_cooldown_left")
 	_cybernetic_time_left = maxf(0.0, float(active_time)) if active_time != null else 0.0
 	_cybernetic_cooldown_left = maxf(0.0, float(cooldown_time)) if cooldown_time != null else 0.0
+
+
+func _sync_boss_state() -> void:
+	if not is_instance_valid(_boss_target):
+		return
+	_boss_max_health = maxf(1.0, float(_boss_target.get("max_health")))
+	_boss_health = clampf(float(_boss_target.get("health")), 0.0, _boss_max_health)
+	_boss_max_energy = maxf(1.0, float(_boss_target.get("max_energy")))
+	_boss_energy = clampf(float(_boss_target.get("energy")), 0.0, _boss_max_energy)
+	_boss_shield = maxf(0.0, float(_boss_target.get("shield")))
+	_boss_entrance_time_left = maxf(0.0, float(_boss_target.get("entrance_time_left")))
+	_boss_defeated = bool(_boss_target.get("is_dead"))
+	_boss_display_name = str(_boss_target.get("display_name"))
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -268,6 +345,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		pause_requested.emit()
 	elif DECK_CONTROL.has_point(mouse):
 		browser_requested.emit(&"all")
+	elif IMPLANTS_CONTROL.has_point(mouse):
+		implants_requested.emit()
 	elif slot >= 0:
 		if not paused and not _player_defeated and not _card(slot).is_empty():
 			card_requested.emit(slot)
@@ -281,12 +360,68 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
+func _hand_slot_count() -> int:
+	return clampi(int(deck.get("hand_size")), SLOT_COUNT, MAX_SLOT_COUNT) if is_instance_valid(deck) else SLOT_COUNT
+
+
 func card_rect(slot: int) -> Rect2:
-	return Rect2(HAND_ORIGIN + Vector2(float(slot) * (CARD_SIZE.x + CARD_GAP), 0.0), CARD_SIZE)
+	var count := _hand_slot_count()
+	if count == SLOT_COUNT:
+		return Rect2(HAND_ORIGIN + Vector2(float(slot) * (CARD_SIZE.x + CARD_GAP), 0.0), CARD_SIZE)
+	# Additional cognitive slots become narrower and spread symmetrically across
+	# the bottom, keeping labels legible and the world clear.
+	var gap := 6.0
+	var width := minf(94.0, (744.0 - gap * (count - 1)) / count)
+	var total_width := width * count + gap * (count - 1)
+	# Extra slots reach the reset button's X range; end at its top edge so
+	# clicking a card's bottom edge can never restart the run.
+	var origin := Vector2((VIEW_SIZE.x - total_width) * 0.5, RESET_CONTROL.position.y - CARD_SIZE.y)
+	return Rect2(origin + Vector2(slot * (width + gap), 0.0), Vector2(width, CARD_SIZE.y))
+
+
+func _layout_hand_labels() -> void:
+	var count := _hand_slot_count()
+	if _layout_slot_count == count:
+		return
+	_layout_slot_count = count
+	for slot in MAX_SLOT_COUNT:
+		var prefix := "slot%d_" % slot
+		var rect := card_rect(slot)
+		for suffix in ["key", "cost", "name", "ready"]:
+			_labels[prefix + suffix].visible = slot < count
+		_labels[prefix + "key"].position = rect.position + Vector2(10, 3)
+		var cost_left := 37.0 if rect.size.x == CARD_SIZE.x else 28.0
+		_labels[prefix + "cost"].position = rect.position + Vector2(cost_left, 5)
+		_labels[prefix + "cost"].size = Vector2(rect.size.x - cost_left - 8.0, 14)
+		_labels[prefix + "name"].position = rect.position + Vector2(3, 43)
+		_labels[prefix + "name"].size = Vector2(rect.size.x - 6, 20)
+		_labels[prefix + "ready"].position = rect.position + Vector2(3, 64)
+		_labels[prefix + "ready"].size = Vector2(rect.size.x - 6, 14)
+		for suffix in ["name", "ready"]:
+			_labels[prefix + suffix].clip_text = true
+			_labels[prefix + suffix].text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		_labels[prefix + "name"].add_theme_font_size_override("font_size", 12 if rect.size.x < 90 else 13)
+	_flashes_reset()
+
+
+func set_implant_inventory(inventory: Node) -> void:
+	_disconnect_signal(implant_inventory, "changed", _on_implants_changed)
+	implant_inventory = inventory
+	if is_instance_valid(implant_inventory) and implant_inventory.has_signal("changed"):
+		implant_inventory.connect("changed", _on_implants_changed)
+	_on_implants_changed()
+
+
+func _on_implants_changed() -> void:
+	if _labels.has("implants_control"):
+		var count := int(implant_inventory.get_equipped_count()) if is_instance_valid(implant_inventory) else 0
+		_labels["implants_control"].text = "义体 %d/5" % count
+	_update_dynamic_labels()
+	queue_redraw()
 
 
 func _slot_at(point: Vector2) -> int:
-	for slot in SLOT_COUNT:
+	for slot in _hand_slot_count():
 		if card_rect(slot).has_point(point):
 			return slot
 	return -1
@@ -301,6 +436,22 @@ func _create_interface() -> void:
 	_add_label("shield", "护盾  0", Vector2(20, 94), 12, BLUE)
 	_add_label("shield_decay", "", Vector2(97, 98), 9, BLUE)
 	_add_label("combat_tip", "抬手时翻滚", Vector2(20, 126), 10, TEXT)
+	_add_label("erosion", "", Vector2(20, 180), 12, PURPLE)
+	var erosion_context := _add_label("erosion_context", "", Vector2(20, 208), 9, MUTED)
+	erosion_context.size = Vector2(210, 14)
+	erosion_context.clip_text = true
+	erosion_context.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var boss_title := _add_label("boss_title", "", Vector2(328, 47), 12, TEXT)
+	boss_title.size = Vector2(176, 18)
+	boss_title.clip_text = true
+	boss_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var boss_health := _add_label("boss_health", "", Vector2(504, 48), 11, RED)
+	boss_health.size = Vector2(128, 18)
+	boss_health.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_add_label("boss_energy", "", Vector2(328, 80), 10, TEAL)
+	var boss_state := _add_label("boss_state", "", Vector2(472, 80), 10, BLUE)
+	boss_state.size = Vector2(160, 18)
+	boss_state.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_add_label("cybernetic_key", "Q", Vector2(750, 23), 14, TEAL)
 	_add_label("cybernetic_title", "爆发加速", Vector2(775, 18), 14, TEXT)
 	_add_label("cybernetic_state", "可用 · 按 Q 激活", Vector2(775, 38), 10, TEAL)
@@ -315,6 +466,8 @@ func _create_interface() -> void:
 	_center_label("hand_count", "手牌 0 / 4", Rect2(872, 316, 76, 16), 9, TEXT)
 	var deck_label := _center_label("deck_control", "查看卡组", DECK_CONTROL, 12, TEXT)
 	deck_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var implants_label := _center_label("implants_control", "义体 0/5", IMPLANTS_CONTROL, 12, TEXT)
+	implants_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	var status_label := _center_label("status", status_text, Rect2(268, 402, 424, 18), 10, TEXT)
 	status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var cycle_label := _center_label("cycle", "", Rect2(280, 18, 400, 18), 10, TEXT)
@@ -326,7 +479,7 @@ func _create_interface() -> void:
 		_center_label(pile_name + "_title", "抽牌堆" if pile_name == "draw" else "弃牌堆", Rect2(rect.position + Vector2(0, 6), Vector2(rect.size.x, 18)), 11, accent)
 		_center_label(pile_name + "_count", "0", Rect2(rect.position + Vector2(0, 23), Vector2(rect.size.x, 30)), 23, TEXT)
 		_center_label(pile_name + "_hint", "点击查看", Rect2(rect.position + Vector2(0, 60), Vector2(rect.size.x, 14)), 9, TEXT)
-	for slot in SLOT_COUNT:
+	for slot in MAX_SLOT_COUNT:
 		var rect := card_rect(slot)
 		var prefix := "slot%d_" % slot
 		_add_label(prefix + "key", str(slot + 1), rect.position + Vector2(10, 3), 12, TEXT)
@@ -363,6 +516,11 @@ func _create_interface() -> void:
 	card_browser.set_script(CARD_BROWSER)
 	card_browser.close_requested.connect(func() -> void: browser_close_requested.emit())
 	add_child(card_browser)
+	# Keep this above every other HUD element so it can cover the full frame
+	# during a scene transition. The component is hidden until explicitly played.
+	matrix_transition = MATRIX_TRANSITION.new()
+	matrix_transition.name = "MatrixTransition"
+	add_child(matrix_transition)
 
 
 func _center_label(id: String, value: String, rect: Rect2, font_size: int, color: Color) -> Label:
@@ -395,12 +553,13 @@ func _add_label(id: String, value: String, label_position: Vector2, font_size: i
 func _update_dynamic_labels() -> void:
 	if not _labels.has("energy_value"):
 		return
+	_layout_hand_labels()
 	_labels["energy_value"].text = "%.1f / %.1f" % [current_energy, max_energy]
 	_labels["energy_value"].add_theme_color_override("font_color", RED if current_energy < 2.0 else TEXT)
 	_labels["health"].text = "生命  %.0f / %.0f" % [current_health, max_health]
 	_labels["health"].add_theme_color_override("font_color", RED if current_health <= max_health * 0.3 else TEXT)
 	_labels["shield"].text = "护盾  %.0f" % current_shield
-	_labels["shield_decay"].text = "−1 / 0.5 秒" if current_shield > 0.0 else ""
+	_labels["shield_decay"].text = "−1 / 0.2 秒" if current_shield > 0.0 else ""
 	_labels["damage"].text = "−%.0f" % _last_damage if _damage_flash > 0.0 else ""
 	_labels["regen"].text = "行动已结束" if _player_defeated else "自动恢复 +%.1f / 秒" % _regen_rate()
 	_labels["status"].text = status_text
@@ -411,7 +570,7 @@ func _update_dynamic_labels() -> void:
 	_labels["discard_count"].text = str(_pile_count("discard_pile"))
 	_labels["draw_hint"].text = "点击查看"
 	var occupied := 0
-	for slot in SLOT_COUNT:
+	for slot in _hand_slot_count():
 		if not _card(slot).is_empty():
 			occupied += 1
 		_update_card_labels(slot)
@@ -422,6 +581,46 @@ func _update_dynamic_labels() -> void:
 	_labels["pause_control"].text = "ESC  继续" if paused else "ESC  暂停"
 	_update_defeat_label()
 	_update_cybernetic_labels()
+	_update_erosion_labels()
+	_update_boss_labels()
+
+
+func _update_erosion_labels() -> void:
+	if not _labels.has("erosion"):
+		return
+	_labels["erosion"].visible = _erosion_visible
+	_labels["erosion_context"].visible = _erosion_visible
+	_labels["erosion"].text = "侵蚀  %d / %d" % [_erosion_value, _erosion_maximum]
+	_labels["erosion"].add_theme_color_override("font_color", _erosion_color())
+	_labels["erosion_context"].text = _erosion_context if not _erosion_context.is_empty() else ("Boss −1/秒" if _erosion_in_boss else "")
+
+
+func _erosion_color() -> Color:
+	if _erosion_in_boss:
+		return ORANGE
+	return RED if _erosion_value >= _erosion_maximum * 0.8 else PURPLE
+
+
+func _update_boss_labels() -> void:
+	if not _labels.has("boss_title"):
+		return
+	var show_boss := is_instance_valid(_boss_target)
+	for id in ["boss_title", "boss_health", "boss_energy", "boss_state"]:
+		_labels[id].visible = show_boss
+	if not show_boss:
+		return
+	_labels["boss_title"].text = _boss_display_name
+	_labels["boss_health"].text = "%.0f / %.0f" % [_boss_health, _boss_max_health]
+	_labels["boss_energy"].text = "能量  %.1f / %.0f" % [_boss_energy, _boss_max_energy]
+	var boss_state := ""
+	if _boss_defeated:
+		boss_state = "已击败"
+	elif _boss_entrance_time_left > 0.0:
+		boss_state = "无敌入场 · %.1f 秒" % _boss_entrance_time_left
+	elif _boss_shield > 0.0:
+		boss_state = "护盾 %.0f" % _boss_shield
+	_labels["boss_state"].text = boss_state
+	_labels["boss_state"].add_theme_color_override("font_color", MUTED if _boss_defeated else BLUE)
 
 
 func _update_cybernetic_labels() -> void:
@@ -480,7 +679,7 @@ func _update_card_labels(slot: int) -> void:
 
 
 func _card(slot: int) -> Dictionary:
-	if not is_instance_valid(deck) or slot < 0 or slot >= SLOT_COUNT:
+	if not is_instance_valid(deck) or slot < 0 or slot >= _hand_slot_count():
 		return {}
 	var hand: Array = deck.get("hand")
 	return hand[slot] if slot < hand.size() else {}
@@ -637,7 +836,7 @@ func _on_card_unlocked(kind: String) -> void:
 
 
 func _on_card_drawn(card: Dictionary, slot: int) -> void:
-	if slot < 0 or slot >= SLOT_COUNT:
+	if slot < 0 or slot >= _hand_slot_count():
 		return
 	var kind := str(card.get("kind", "slash"))
 	_slot_flash[slot] = 0.6
@@ -650,7 +849,7 @@ func _on_card_drawn(card: Dictionary, slot: int) -> void:
 
 
 func _on_card_discarded(card: Dictionary, slot: int) -> void:
-	if slot < 0 or slot >= SLOT_COUNT:
+	if slot < 0 or slot >= _hand_slot_count():
 		return
 	var kind := str(card.get("kind", "slash"))
 	_discard_flash = 0.55
@@ -681,14 +880,16 @@ func _draw() -> void:
 	_draw_cybernetic_panel()
 	_draw_health_bar()
 	_draw_shield_bar()
+	_draw_erosion_bar()
+	_draw_boss_panel()
 	_draw_energy_bar()
 	_draw_pile(DRAW_PILE, TEAL, _pile_count("draw_pile"), _draw_flash)
 	_draw_pile(DISCARD_PILE, PURPLE, _pile_count("discard_pile"), _discard_flash)
-	for slot in SLOT_COUNT:
+	for slot in _hand_slot_count():
 		_draw_card(slot)
 	_draw_flights()
 	var mouse := get_local_mouse_position()
-	for rect: Rect2 in [RESET_CONTROL, PAUSE_CONTROL, DECK_CONTROL]:
+	for rect: Rect2 in [RESET_CONTROL, PAUSE_CONTROL, DECK_CONTROL, IMPLANTS_CONTROL]:
 		draw_rect(rect, PANEL)
 		draw_rect(rect, Color(TEAL, 0.42), false, 1.0)
 		if rect.has_point(mouse):
@@ -710,6 +911,31 @@ func _draw_shield_bar() -> void:
 	if fill_ratio > 0.0:
 		draw_rect(Rect2(SHIELD_BAR.position, Vector2(SHIELD_BAR.size.x * fill_ratio, SHIELD_BAR.size.y)), BLUE)
 	draw_rect(SHIELD_BAR, Color(BLUE, 0.5), false, 1.0)
+
+
+func _draw_erosion_bar() -> void:
+	if not _erosion_visible:
+		return
+	var accent := _erosion_color()
+	var fill_ratio := float(_erosion_value) / float(_erosion_maximum)
+	draw_rect(EROSION_BAR, Color(BG, 0.9))
+	if fill_ratio > 0.0:
+		draw_rect(Rect2(EROSION_BAR.position, Vector2(EROSION_BAR.size.x * fill_ratio, EROSION_BAR.size.y)), accent)
+	draw_rect(EROSION_BAR, Color(accent, 0.55), false, 1.0)
+
+
+func _draw_boss_panel() -> void:
+	if not is_instance_valid(_boss_target):
+		return
+	var accent := BLUE if _boss_entrance_time_left > 0.0 else RED
+	draw_rect(BOSS_PANEL, Color(BG, 0.76))
+	draw_rect(BOSS_PANEL, Color(accent, 0.28), false, 1.0)
+	draw_rect(BOSS_HEALTH_BAR, Color(GRID, 0.8))
+	if _boss_health > 0.0:
+		draw_rect(Rect2(BOSS_HEALTH_BAR.position, Vector2(BOSS_HEALTH_BAR.size.x * _boss_health / _boss_max_health, BOSS_HEALTH_BAR.size.y)), accent)
+	draw_rect(BOSS_ENERGY_BAR, Color(GRID, 0.8))
+	if _boss_energy > 0.0:
+		draw_rect(Rect2(BOSS_ENERGY_BAR.position, Vector2(BOSS_ENERGY_BAR.size.x * _boss_energy / _boss_max_energy, BOSS_ENERGY_BAR.size.y)), TEAL)
 
 
 func _draw_damage_edges() -> void:
@@ -773,7 +999,7 @@ func _draw_card(slot: int) -> void:
 	if card.is_empty():
 		draw_rect(rect, PANEL)
 		draw_rect(rect, Color(GRID, 0.72), false, 1.0)
-		var center := rect.position + Vector2(CARD_SIZE.x / 2.0, 32)
+		var center := rect.position + Vector2(rect.size.x / 2.0, 32)
 		draw_arc(center, 9, 0, TAU, 32, Color(GRID, 0.7), 1.5, true)
 		var progress := 1.0 - clampf(_refill_time(slot), 0.0, 1.0)
 		if progress > 0.0:
@@ -795,7 +1021,7 @@ func _draw_card(slot: int) -> void:
 	draw_rect(Rect2(rect.position, Vector2(rect.size.x, 2)), Color(accent, 0.86 if ready else 0.36))
 	draw_line(rect.position + Vector2(8, 63), rect.position + Vector2(rect.size.x - 8, 63), Color(accent, 0.25), 1.0)
 	_draw_keycap(rect, accent if ready else MUTED)
-	draw_set_transform(rect.position + Vector2(CARD_SIZE.x / 2.0, 31), 0.0, Vector2(0.65, 0.65))
+	draw_set_transform(rect.position + Vector2(rect.size.x / 2.0, 31), 0.0, Vector2(0.65, 0.65))
 	_draw_card_icon(Vector2.ZERO, kind, Color(accent, 1.0 if ready else 0.42))
 	draw_set_transform(Vector2.ZERO)
 

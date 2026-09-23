@@ -2,6 +2,7 @@ extends Node3D
 ## Invisible service anchor. The city generator owns building geometry.
 
 const CATALOG = preload("res://card_catalog.gd")
+const IMPLANTS = preload("res://implant_catalog.gd")
 ## Kept as data for the 2D city map legend; these colors are no longer used
 ## for any world-space sign, ring or building stripe.
 const COLORS := {
@@ -23,6 +24,13 @@ var _deck: Node
 var _controller: Node
 var _interaction_center := Vector3.ZERO
 var _interaction_half_extents := Vector2(7.0, 5.0)
+## Factory rewards are generated when the district is generated, so opening the
+## same seeded map always presents the same choices.  The reward itself is
+## claimed by floor_one's modal; no card or implant is added before the player
+## makes that choice.
+var reward_type: StringName = &""
+var reward_card_options: Array[String] = []
+var reward_implant_kind := ""
 
 
 func _ready() -> void:
@@ -44,7 +52,24 @@ func setup(building_data: Dictionary, actor: CharacterBody3D, card_deck: Node, f
 	position = data.get("interaction_position", _interaction_center)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(_controller.get("map_seed")) * 1009 + building_id * 7919 + 31
-	event_index = rng.randi_range(0, 2)
+	# Factories have exactly two reward outcomes.  The seeded choice keeps a
+	# retried district deterministic while still making each generated district
+	# vary between card and implant discoveries.
+	event_index = rng.randi_range(0, 1)
+	reward_type = &""
+	reward_card_options.clear()
+	reward_implant_kind = ""
+	if event_index == 0:
+		reward_type = &"card"
+		var cards := CATALOG.kinds()
+		for _index in range(2):
+			var picked_index := rng.randi_range(0, cards.size() - 1)
+			reward_card_options.append(str(cards.pop_at(picked_index)))
+	else:
+		reward_type = &"implant"
+		var implants := IMPLANTS.kinds()
+		if not implants.is_empty():
+			reward_implant_kind = str(implants[rng.randi_range(0, implants.size() - 1)])
 
 
 func can_interact() -> bool:
@@ -73,52 +98,51 @@ func interact() -> bool:
 		return false
 	match kind:
 		"shop":
-			if _has_locked_cards():
-				if not bool(_controller.call("spend_credits", 20)):
-					_message("信用不足 · 需要 20", true)
-					return false
-				var unlocked := str(_controller.call("unlock_next_card"))
-				if unlocked.is_empty():
-					_controller.call("add_credits", 20)
-					return false
-				_message("购得记忆：%s" % CATALOG.card_name(unlocked))
-			else:
-				if _player.energy >= _player.max_energy:
-					_message("能量已满")
-					return false
-				if not bool(_controller.call("spend_credits", 10)):
-					_message("信用不足 · 需要 10", true)
-					return false
-				_refill_energy()
-				_message("补给完成 · 能量已满")
+			return bool(_controller.call("open_shop", building_id))
 		"medical":
 			var restored := float(_controller.call("restore_health", 40.0))
 			if restored <= 0.0:
 				_message("生命已满 · 医疗补给仍保留")
 				return false
 			used = true
+			if _controller.has_method("record_facility_entry"):
+				_controller.call("record_facility_entry", &"medical")
 			_message("治疗完成 · 生命 +%.0f" % restored)
 		"factory":
-			used = true
 			match event_index:
 				0:
-					_controller.call("add_credits", 15)
-					_message("找到留存信用 · +15")
+					# The floor owns the modal, pause state and final grant.  Marking
+					# this service used only after the modal opened prevents a failed
+					# open (for example while another overlay is active) from consuming
+					# the one-time factory reward.
+					if reward_card_options.size() < 2 or not _controller.has_method("open_reward"):
+						return false
+					var opened := bool(_controller.call("open_reward", "factory", {
+						"type": "card",
+						"options": reward_card_options.duplicate(),
+					}))
+					if not opened:
+						return false
+					used = true
+					if _controller.has_method("record_facility_entry"):
+						_controller.call("record_facility_entry", &"factory")
 				1:
-					_refill_energy()
-					_message("接通备用电源 · 能量已满")
-				2:
-					var unlocked := str(_controller.call("unlock_next_card"))
-					if unlocked.is_empty():
-						_controller.call("add_credits", 15)
-						_message("记忆已齐全 · 回收信用 +15")
-					else:
-						_message("找回记忆：%s" % CATALOG.card_name(unlocked))
+					if reward_implant_kind.is_empty() or not _controller.has_method("open_reward"):
+						return false
+					var opened := bool(_controller.call("open_reward", "factory", {
+						"type": "implant",
+						"kind": reward_implant_kind,
+					}))
+					if not opened:
+						return false
+					used = true
+					if _controller.has_method("record_facility_entry"):
+						_controller.call("record_facility_entry", &"factory")
 		"police":
 			used = true
 			var unlocked := str(_controller.call("unlock_next_card"))
 			_controller.call("add_credits", 20)
-			_message("装备箱 · %s / 信用 +20" % CATALOG.card_name(unlocked) if not unlocked.is_empty() else "装备箱 · 信用 +20")
+			_message("装备箱 · %s / 金币 +20" % CATALOG.card_name(unlocked) if not unlocked.is_empty() else "装备箱 · 金币 +20")
 		_:
 			return false
 	return true

@@ -253,7 +253,7 @@ func _zone_name(card: Dictionary) -> String:
 		"hand": return "手牌 · 槽位 %d" % (int(card.get("hand_slot", 0)) + 1)
 		"catalog":
 			if bool(card.get("unlocked", false)):
-				return "已恢复 · 已加入牌组"
+				return "已恢复 · 已知动作"
 			if not discovery_hint.is_empty():
 				return discovery_hint
 			return "未恢复 · %s记忆" % _category(str(card.get("kind", "")))

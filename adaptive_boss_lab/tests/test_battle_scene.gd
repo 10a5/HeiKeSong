@@ -16,13 +16,18 @@ func _run() -> void:
 		quit(1)
 		return
 	scene.llm_bridge.configure({"enabled": false})
+	_check(scene.target.is_entering and scene.boss_energy_label.text.contains("入场护盾"), "实际场景开局显示无敌入场倒计时")
+	_check(scene.build_llm_context()["opponent"]["entrance_invulnerable"], "摘要明确标记入场无敌状态")
 	scene.target.combat_enabled = false
 	await _frames(20)
 	_check(scene.player.get_script() == load("res://player.gd"), "决战场使用真实 player.gd")
+	_check(scene.target.get_script() == load("res://mirror_boss.gd"), "决战场接入镜像 Boss 控制器")
+	_check(scene.target._character_visual.model_root.scene_file_path == scene.player._character_visual.model_root.scene_file_path, "实际场景中 Boss 与主角外形相同")
+	_check(is_equal_approx(scene.boss_energy_bar.max_value, scene.target.max_energy) and is_equal_approx(scene.boss_energy_bar.value, scene.target.energy), "Boss 拥有独立能量条")
 	_check(scene.deck.hand.size() == 4 and scene.deck.total_cards == 18, "真实全解锁牌库发出四张手牌")
 	_check(scene.arena.find_children("*", "StaticBody3D", true, false).size() > 0, "决战 GLB 表面有真实碰撞")
 	_check(scene.player.is_on_floor(), "玩家出生在模型表面，稳定落地")
-	_check(scene.brain.player == scene.player and scene.brain.opponent == scene.target, "行为脑绑定真实玩家及训练敌人")
+	_check(scene.brain.player == scene.player and scene.brain.opponent == scene.target, "行为脑绑定真实玩家及镜像 Boss")
 	var start: Vector3 = scene.player.global_position
 	Input.action_press("move_right")
 	await _frames(35)
@@ -56,6 +61,9 @@ func _run() -> void:
 	_check(scene.deck.hand.size() + scene.deck.draw_pile.size() + scene.deck.discard_pile.size() == scene.deck.total_cards, "牌组总量守恒")
 	# An actual close-range hit passes through the same geometry and damage code.
 	scene.player.reset_player()
+	# Damage tests need the normal combat state; the default intro is covered
+	# at boot and again through the real reset path below.
+	scene.target.entrance_duration = 0.0
 	scene.target.reset_enemy()
 	scene.target.combat_enabled = false
 	scene.player.global_position = scene._surface_point(0, 1)
@@ -65,6 +73,7 @@ func _run() -> void:
 	var health_before: float = scene.target.health
 	_check(scene.player.request_card("slash"), "近战攻击正常执行")
 	_check(scene.target.health < health_before, "真实几何判定扣除敌人血量")
+	_check(is_equal_approx(scene.boss_health_bar.value, scene.target.health), "Boss 血条随真实伤害更新")
 	_check(scene.gameplay_observer.summary()["attack_results"]["hit"] > 0, "已发生的命中结果进入摘要")
 	await _frames(20)
 	scene.player.facing = Vector3.RIGHT
@@ -89,12 +98,30 @@ func _run() -> void:
 	_check(scene.export_report(report_path) == OK, "可导出行为总结 JSON")
 	var report: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(report_path))
 	_check(report["source"] == "live_player" and report["context"]["world_model"].has("gameplay"), "导出包含真实动作与移动总结")
+	_check(report["context"]["opponent"]["controller"] == "fixed_combo_fsm" and report["context"]["opponent"]["combos"].size() == 2, "摘要明确当前 Boss 使用两套固定连招")
 	_check(not _has_forbidden_key(report), "导出不含手牌、牌堆、随机种子或密钥")
 	_check(not scene.llm_bridge.busy and not scene.auto_send.button_pressed, "离线默认不请求真实 LLM")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(report_path))
+	scene.target.entrance_duration = 3.0
 	scene._reset_battle()
+	_check(scene.target.is_entering and scene.target.entrance_time_left == 3.0, "R 重置后重新获得完整入场保护")
 	_check(int(scene.brain.snapshot()["actions_seen"]) == 0, "新观察清空画像")
 	_check(scene.gameplay_observer.summary()["observed_seconds"] == 0, "重置不把传送距离当作移动")
+	# The authored floor is curved. Flat-arena actor tests alone cannot show
+	# that safe-ground probes permit both complete combos on this real mesh.
+	var completed_combos: Array[String] = []
+	scene.target.combo_finished.connect(func(kind: StringName): completed_combos.append(str(kind)))
+	scene.player.max_health = 10000.0
+	scene.player.health = 10000.0
+	scene.target.combat_enabled = true
+	for i in range(1100):
+		await physics_frame
+		if completed_combos.size() >= 2:
+			break
+	_check(completed_combos == ["roll_punches", "dash_kick"], "真实曲面竞技场上依次完成两套连招")
+	_check(scene.player.health < 10000.0, "镜像 Boss 在真实场景中造成伤害")
+	_check(scene.target.is_on_floor() and scene.target.global_position.y > -8.0, "连招结束仍站在实际场景地面")
+	_check(int(scene.brain.snapshot()["total_actions_seen"]) == 0, "Boss 的出招不会算作玩家行为")
 	scene.queue_free()
 	await process_frame
 	print("BATTLE SCENE RESULT: %d passed, %d failed" % [passed, failed])

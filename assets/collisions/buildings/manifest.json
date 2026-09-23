@@ -142,5 +142,23 @@
     ],
     "sampled_error_p95_m": 0.0215,
     "sampled_error_max_m": 0.1283
+  },
+  "medical": {
+    "source": "医疗点.glb",
+    "sha256": "e5395749b748e5eabf77c85fb3992c0c893206974b0a729ddfe7db15246f7c2c",
+    "source_triangles": 1838474,
+    "collision_triangles": 14000,
+    "source_min": [
+      -0.4903564453125,
+      0.0,
+      -0.3788604140281677
+    ],
+    "source_max": [
+      0.4903564453125,
+      0.9593201279640198,
+      0.3788604140281677
+    ],
+    "sampled_error_p95_m": 0.0274,
+    "sampled_error_max_m": 0.0705
   }
 }

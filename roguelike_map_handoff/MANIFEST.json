@@ -1,0 +1,249 @@
+{
+    "package":  "roguelike_map_handoff (ActualBuildingBridgePreview)",
+    "generated_at":  "2026-09-23 16:25:30",
+    "engine":  "Godot 4.7.2-stable (Forward+ / Jolt Physics)",
+    "main_scene":  "res://scenes/ActualBuildingBridgePreview.tscn",
+    "reference_seed":  20260923,
+    "file_count":  38,
+    "files":  [
+                  {
+                      "package_path":  "drop_in/scenes/ActualBuildingBridgePreview.tscn",
+                      "target":  "res://scenes/ActualBuildingBridgePreview.tscn",
+                      "bytes":  244054,
+                      "sha256":  "5ac4133e241d6ee2c52920cfe80c2cde442297b76a2bdc887cc4b333ac486389"
+                  },
+                  {
+                      "package_path":  "drop_in/scenes/GrayboxBridgeRoadPreview.tscn",
+                      "target":  "res://scenes/GrayboxBridgeRoadPreview.tscn",
+                      "bytes":  200659,
+                      "sha256":  "400c062f9dd6db0d7ab433575c780ea7bde98b1f54815b0f096970ac1e88f500"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/build_seven_building_map.gd",
+                      "target":  "res://tests/build_seven_building_map.gd",
+                      "bytes":  9459,
+                      "sha256":  "ec33ab0326b386880c1359ebdc807f8f0384301184585e10dd556e285f2ce28c"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/build_seven_building_map.gd.uid",
+                      "target":  "res://tests/build_seven_building_map.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "a2dac1a1b7487d363771f107b7a09d1339dbbc05ab137b7181e8c24e1e0690d4"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/test_actual_buildings.gd",
+                      "target":  "res://tests/test_actual_buildings.gd",
+                      "bytes":  2897,
+                      "sha256":  "9c39264337eefea64e452e936ac5de4efeb481204630a878025b99ee4f4daec1"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/test_actual_buildings.gd.uid",
+                      "target":  "res://tests/test_actual_buildings.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "fe3cce4842fecdbc1f13292b0692870f76b964b73c93d758aea809c65fc92743"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/test_dispersed_city_services.gd",
+                      "target":  "res://tests/test_dispersed_city_services.gd",
+                      "bytes":  2327,
+                      "sha256":  "a99c34273d225a321e726681f17046183a12a9da0fc6c864a811e56ec0f06526"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/test_dispersed_city_services.gd.uid",
+                      "target":  "res://tests/test_dispersed_city_services.gd.uid",
+                      "bytes":  19,
+                      "sha256":  "bff30e8253e7283a79adcf5cb322139e006946ba2699c8e83d6239f991092c52"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/test_graybox_preview.gd",
+                      "target":  "res://tests/test_graybox_preview.gd",
+                      "bytes":  3454,
+                      "sha256":  "810065a5f909ad484cb56def252fe5ee56ee21576fa00c79347d24557f1c2f0f"
+                  },
+                  {
+                      "package_path":  "drop_in/tests/test_graybox_preview.gd.uid",
+                      "target":  "res://tests/test_graybox_preview.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "bce4ceb903acbeb9256dc04a56ebab6d5fae37b59582f51890c5f2607fa7c526"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/actual_bridge_geometry.gd",
+                      "target":  "res://tools/actual_bridge_geometry.gd",
+                      "bytes":  1861,
+                      "sha256":  "66f021ac336339a98e40d8918c1c6076119f055dd9730464a532718056936cd1"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/actual_bridge_geometry.gd.uid",
+                      "target":  "res://tools/actual_bridge_geometry.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "ec4338eb58f63a65980e545cf463eb18d13f4fb9ebf9e37bc63fe52e4f4bdbb2"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/actual_building_controls.gd",
+                      "target":  "res://tools/actual_building_controls.gd",
+                      "bytes":  2285,
+                      "sha256":  "9bf5776174115ac3eaf13e10277820593ca129749c1fe608bc31101b633087e2"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/actual_building_controls.gd.uid",
+                      "target":  "res://tools/actual_building_controls.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "ef538f87e167857b835c57aefb0faeec9bdce3928d85b708a00ad4039ccee934"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/actual_building_geometry.gd",
+                      "target":  "res://tools/actual_building_geometry.gd",
+                      "bytes":  3253,
+                      "sha256":  "f47c5ce98effbe05a31dd91b2b17f5e7c2379c1a6b18c854a581aff878edfef9"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/actual_building_geometry.gd.uid",
+                      "target":  "res://tools/actual_building_geometry.gd.uid",
+                      "bytes":  19,
+                      "sha256":  "5551fc2f7b56e791283404ffdb696bc69b8abb006457b809c793231b3ce99a56"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/build_actual_building_preview.gd",
+                      "target":  "res://tools/build_actual_building_preview.gd",
+                      "bytes":  1000,
+                      "sha256":  "1d3f86009bd3e6cd3922fae3fbefd8a0a25e4587a32457958e2b6ba4d3cf3aed"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/build_actual_building_preview.gd.uid",
+                      "target":  "res://tools/build_actual_building_preview.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "0535ec2b65da0c17127c85b73ed402fac24b9dcfb8d4635cf31684a85c6c44a1"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/build_graybox_preview.gd",
+                      "target":  "res://tools/build_graybox_preview.gd",
+                      "bytes":  1453,
+                      "sha256":  "535b16010a63e7086eeca1076f8082a50cd8703e1126e6088a180443b9619058"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/build_graybox_preview.gd.uid",
+                      "target":  "res://tools/build_graybox_preview.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "8710636d5632bf88126af058a9f920fcb73150dbd35123c91724d43457ae957b"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/dispersed_city_geometry.gd",
+                      "target":  "res://tools/dispersed_city_geometry.gd",
+                      "bytes":  1651,
+                      "sha256":  "e58c446152bf56d906c77eed2e78cef9655be7559f8be5bacf64f177476eb7fd"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/dispersed_city_geometry.gd.uid",
+                      "target":  "res://tools/dispersed_city_geometry.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "133cfe46d39766f8b3548717a9d47b8d53dee2f3d318ea2cced45c8fec2261ff"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/dispersed_city_layout.gd",
+                      "target":  "res://tools/dispersed_city_layout.gd",
+                      "bytes":  686,
+                      "sha256":  "9a7e1294953a70e025e251d9429f8f7cdf600f11fb0fb489e81ff5b48d86c6c8"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/dispersed_city_layout.gd.uid",
+                      "target":  "res://tools/dispersed_city_layout.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "a3634274040f7665daa709982b131df8654c01932db5f64f074b8b651ea2bd98"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/graybox_geometry.gd",
+                      "target":  "res://tools/graybox_geometry.gd",
+                      "bytes":  5458,
+                      "sha256":  "fcbea9b51a84b7a848d6cfab31992f3067b1e483cdb37ab96abaae3d71d42d5b"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/graybox_geometry.gd.uid",
+                      "target":  "res://tools/graybox_geometry.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "d2acf50ec178acfacfcf23c5b5a694842b2d979e4c3bb4dc0d549faa4fb7314f"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/graybox_layout.gd",
+                      "target":  "res://tools/graybox_layout.gd",
+                      "bytes":  5030,
+                      "sha256":  "71458579f4be80156648dd209af9b12549530d702ac6465f4b4c18595a1f5d1e"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/graybox_layout.gd.uid",
+                      "target":  "res://tools/graybox_layout.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "cc1b86104f53f62033da8ee185a09d565c0d921e65991759052fae76f1212cf5"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/graybox_preview_controls.gd",
+                      "target":  "res://tools/graybox_preview_controls.gd",
+                      "bytes":  3375,
+                      "sha256":  "ad3595b8886292a28e676af9fc37e36ff92c786b4b6dd0d33ba4d98037905a3b"
+                  },
+                  {
+                      "package_path":  "drop_in/tools/graybox_preview_controls.gd.uid",
+                      "target":  "res://tools/graybox_preview_controls.gd.uid",
+                      "bytes":  20,
+                      "sha256":  "963394e8e4405989f98dddcc47e58dbc591a41c5981ac172b690a7c25c3b0344"
+                  },
+                  {
+                      "package_path":  "preview_overview.png",
+                      "target":  "(包内文档)",
+                      "bytes":  216716,
+                      "sha256":  "7de6bb3c40ae9f1d070705a900e40ee7c4ff80bc6e8df0ddd8d117d13c95438c"
+                  },
+                  {
+                      "package_path":  "preview_runtime.png",
+                      "target":  "(包内文档)",
+                      "bytes":  168791,
+                      "sha256":  "3fb7325dc391d2a7404ce434602331412c9ae6ac550cee3221be93f96e6cc203"
+                  },
+                  {
+                      "package_path":  "README_HANDOFF.md",
+                      "target":  "(包内文档)",
+                      "bytes":  24602,
+                      "sha256":  "cc3a6499e959c1f366d21bd986810f99044b6c2dac390f160a221faf58d5841a"
+                  },
+                  {
+                      "package_path":  "reference/actual_building_validation.json",
+                      "target":  "(参考，勿拷入项目)",
+                      "bytes":  3180,
+                      "sha256":  "cd3a651e9e67e93b086e6a630f7052919601efd19324a65e22f8ffcf215f0aa5"
+                  },
+                  {
+                      "package_path":  "reference/ActualBuildingBridgePreview_README.md",
+                      "target":  "(参考，勿拷入项目)",
+                      "bytes":  1660,
+                      "sha256":  "9de5f2a5592b7eaf1b4b74f8c84ca93e45f65dd0a7760ea8d4e8851fc59bcfc9"
+                  },
+                  {
+                      "package_path":  "reference/dispersed_city_validation.json",
+                      "target":  "(参考，勿拷入项目)",
+                      "bytes":  171,
+                      "sha256":  "470f79dc98c26fec8e8d9cd2f7f9a25049d3f272a112257b94c2bca9b3509711"
+                  },
+                  {
+                      "package_path":  "reference/graybox_validation.json",
+                      "target":  "(参考，勿拷入项目)",
+                      "bytes":  1466,
+                      "sha256":  "5dedf358a00e4f02f25fa2c42106486d495e550d3b142183a4a5cf5665f0671a"
+                  },
+                  {
+                      "package_path":  "reference/GrayboxBridgeRoadPreview_README.md",
+                      "target":  "(参考，勿拷入项目)",
+                      "bytes":  2170,
+                      "sha256":  "870f1a1a3b1fcd4d218d8144e5a8e1f5cdb7390e613884c8a75c131880b9ee65"
+                  }
+              ],
+    "excluded_dependencies":  [
+                                  "9 GLB models (居民楼2/3/4/4k/5, 工厂1, 商店, 医疗点, 重置桥 .glb), about 329 MB",
+                                  "Textures for those models: 27 files, about 171 MB",
+                                  "addons/godot_ai (only needed to run the test suites)"
+                              ],
+    "notes":  [
+                  "drop_in/ mirrors the res:// layout; copy its contents into your Godot project root.",
+                  "reference/ holds snapshots of the earlier READMEs and validation JSON files; do not use them as program input.",
+                  "Running the suites rewrites tools/graybox_validation.json and tools/dispersed_city_validation.json."
+              ],
+    "file_count_note":  "files[] excludes MANIFEST.json itself; total entries in the archive = 39"
+}

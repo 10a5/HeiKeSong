@@ -4,9 +4,13 @@ extends Node3D
 
 const HUD_SCRIPT = preload("res://hud.gd")
 const DECK_SCRIPT = preload("res://deck.gd")
+const IMPLANT_INVENTORY = preload("res://implant_inventory.gd")
 const ENEMY_SCRIPT = preload("res://enemy.gd")
 const BOSS_BRAIN_SCRIPT = preload("res://boss_brain.gd")
 const UNLOCK_TERMINAL_SCRIPT = preload("res://unlock_terminal.gd")
+const SHOP_SYSTEM = preload("res://shop_system.gd")
+const SHOP_PANEL = preload("res://shop_panel.gd")
+const REWARD_FLOW = preload("res://reward_flow.gd")
 const DEFAULT_YAW := 0.42
 const DEFAULT_PITCH := 0.74
 const DEFAULT_DISTANCE := 18.0
@@ -18,6 +22,10 @@ const CAMERA_MAX_DISTANCE := 85.0
 @onready var player: CharacterBody3D = $Player
 var hud: Control
 var deck: Node
+var shop_system: Node
+var shop_panel: Control
+var reward_flow: Node
+var inventory: Node
 var enemy: CharacterBody3D
 ## The adaptive brain is telemetry + bounded planning only. A future final boss
 ## can consume its reaction_requested signal without putting an LLM in combat.
@@ -50,6 +58,10 @@ func _ready() -> void:
 	deck.set_script(DECK_SCRIPT)
 	add_child(deck)
 	deck.setup(player)
+	inventory = IMPLANT_INVENTORY.new()
+	inventory.name = "ImplantInventory"
+	add_child(inventory)
+	inventory.setup(player, deck)
 	_create_unlock_terminals()
 	var canvas := CanvasLayer.new()
 	canvas.name = "HUD"
@@ -59,11 +71,14 @@ func _ready() -> void:
 	hud.name = "Interface"
 	canvas.add_child(hud)
 	hud.setup(player, deck)
+	hud.set_implant_inventory(inventory)
 	hud.card_requested.connect(_on_card_requested)
 	hud.reset_requested.connect(restart)
 	hud.pause_requested.connect(toggle_pause)
 	hud.browser_requested.connect(open_card_browser)
 	hud.browser_close_requested.connect(close_card_browser)
+	_setup_shop_system(canvas)
+	_setup_reward_flow(canvas)
 	_setup_adaptive_brain()
 	player.movement_yaw = camera_yaw
 
@@ -74,7 +89,7 @@ func _physics_process(_delta: float) -> void:
 	if Input.is_action_just_pressed("cybernetic_boost"):
 		player.activate_cybernetic()
 	# Numbers refer to hand positions, never directly to an action type.
-	for slot in range(4):
+	for slot in range(deck.hand_size):
 		if Input.is_action_just_pressed("hand_%d" % (slot + 1)):
 			deck.play_slot(slot)
 			break
@@ -93,6 +108,37 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if is_instance_valid(reward_flow) and reward_flow.is_open():
+		if event is InputEventKey:
+			if event.pressed and not event.echo:
+				if event.keycode == KEY_ESCAPE:
+					reward_flow.skip()
+				elif event.keycode == KEY_R:
+					restart()
+				elif event.keycode == KEY_N:
+					if has_method("regenerate_floor"):
+						call("regenerate_floor")
+					else:
+						restart()
+			get_viewport().set_input_as_handled()
+		elif reward_flow.is_transitioning():
+			# Keep the choice under the numeric rain until the reveal finishes;
+			# after that, let RewardPanel's buttons receive mouse input normally.
+			get_viewport().set_input_as_handled()
+			return
+		return
+	if is_instance_valid(shop_system) and shop_system.is_open():
+		if shop_system.is_transitioning() and (event is InputEventMouse or event is InputEventGesture or event is InputEventScreenTouch or event is InputEventScreenDrag):
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventKey:
+			if event.pressed and not event.echo:
+				if event.keycode in [KEY_ESCAPE, KEY_I]:
+					shop_system.close()
+				elif event.keycode == KEY_R:
+					restart()
+			get_viewport().set_input_as_handled()
+		return
 	# Handle modal shortcuts before focused GUI buttons can consume Escape/Tab.
 	if not is_instance_valid(hud) or not hud.is_browser_open():
 		return
@@ -106,9 +152,25 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if is_instance_valid(reward_flow) and reward_flow.is_open():
+		get_viewport().set_input_as_handled()
+		return
+	if is_instance_valid(shop_system) and shop_system.is_open():
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_R:
 			restart()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_I:
+			shop_system.open_inventory()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_T:
+			# Preview the transition effect in the running demo. Scene-specific
+			# transitions can call play_matrix_transition() directly instead.
+			play_matrix_transition()
 			get_viewport().set_input_as_handled()
 			return
 		elif event.keycode == KEY_ESCAPE:
@@ -177,7 +239,10 @@ func try_interact() -> bool:
 
 func _on_enemy_defeated() -> void:
 	if enemy.is_dead:
-		player.status_changed.emit("训练敌人已击败 · 按 R 再来一局", false)
+		if is_instance_valid(reward_flow):
+			reward_flow.enqueue_reward("enemy", reward_flow.make_random_reward(int(Time.get_ticks_msec())))
+		else:
+			player.status_changed.emit("训练敌人已击败 · 按 R 再来一局", false)
 
 
 func _setup_adaptive_brain() -> void:
@@ -195,11 +260,20 @@ func _setup_adaptive_brain() -> void:
 func _on_adaptive_reaction(reaction: StringName, payload: Dictionary) -> void:
 	# Keep the current training foe deterministic. The hook is ready for the
 	# future Mirror controller, which can implement apply_adaptive_reaction().
-	if is_instance_valid(enemy) and enemy.has_method("apply_adaptive_reaction"):
-		enemy.apply_adaptive_reaction(reaction, payload)
+	var reaction_target: Node = enemy
+	if has_method("get") and get("_boss_active") == true:
+		var live_boss: Variant = get("boss_target")
+		if is_instance_valid(live_boss):
+			reaction_target = live_boss
+	if is_instance_valid(reaction_target) and reaction_target.has_method("apply_adaptive_reaction"):
+		reaction_target.apply_adaptive_reaction(reaction, payload)
 
 
 func restart() -> void:
+	if is_instance_valid(reward_flow):
+		reward_flow.reset()
+	if is_instance_valid(shop_system):
+		shop_system.reset_run()
 	hud.hide_browser()
 	_paused_before_browser = false
 	paused = false
@@ -214,6 +288,8 @@ func restart() -> void:
 		boss_brain.reset_observation()
 		if boss_brain.has_method("attach_opponent"):
 			boss_brain.attach_opponent(enemy)
+	inventory.reset_inventory()
+	deck.clear_purchased_cards()
 	deck.reset_deck()
 	for terminal in unlock_terminals:
 		terminal.refresh_state()
@@ -225,6 +301,12 @@ func restart() -> void:
 
 
 func toggle_pause() -> void:
+	if is_instance_valid(reward_flow) and reward_flow.is_open():
+		reward_flow.skip()
+		return
+	if is_instance_valid(shop_system) and shop_system.is_open():
+		shop_system.close()
+		return
 	if hud.is_browser_open():
 		close_card_browser()
 		return
@@ -235,6 +317,10 @@ func toggle_pause() -> void:
 
 
 func open_card_browser(view: StringName = &"all") -> void:
+	if is_instance_valid(reward_flow) and reward_flow.is_open():
+		return
+	if is_instance_valid(shop_system) and shop_system.is_open():
+		return
 	if view not in [&"all", &"draw", &"discard", &"catalog"]:
 		return
 	if not hud.is_browser_open():
@@ -254,6 +340,45 @@ func close_card_browser() -> void:
 	get_tree().paused = paused
 	_orbiting = false
 	hud.set_paused(paused)
+
+
+## Play the reusable full-screen Matrix-style transition through the HUD.
+func play_matrix_transition(
+	fade_in_duration: float = 0.24,
+	hold_duration: float = 0.85,
+	fade_out_duration: float = 0.34
+) -> void:
+	if is_instance_valid(hud) and hud.has_method("play_matrix_transition"):
+		hud.play_matrix_transition(fade_in_duration, hold_duration, fade_out_duration)
+
+
+func stop_matrix_transition() -> void:
+	if is_instance_valid(hud) and hud.has_method("stop_matrix_transition"):
+		hud.stop_matrix_transition()
+
+
+func _setup_shop_system(canvas: CanvasLayer) -> void:
+	shop_panel = SHOP_PANEL.new()
+	shop_panel.name = "ShopPanel"
+	canvas.add_child(shop_panel)
+	shop_system = SHOP_SYSTEM.new()
+	shop_system.name = "ShopSystem"
+	add_child(shop_system)
+	shop_system.setup(self, shop_panel, inventory, deck)
+	hud.implants_requested.connect(shop_system.open_inventory)
+
+
+func _setup_reward_flow(canvas: CanvasLayer) -> void:
+	if is_instance_valid(reward_flow):
+		reward_flow.queue_free()
+	reward_flow = REWARD_FLOW.new()
+	reward_flow.name = "RewardFlow"
+	add_child(reward_flow)
+	reward_flow.setup(self, canvas, hud, deck, inventory)
+
+
+func open_reward(source: String, reward: Dictionary) -> bool:
+	return is_instance_valid(reward_flow) and bool(reward_flow.open_reward(source, reward))
 
 
 func _create_camera() -> void:

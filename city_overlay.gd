@@ -82,7 +82,7 @@ func _draw() -> void:
 	if encounters is Array and not encounters.is_empty():
 		total = encounters.size()
 	if not map_open:
-		_text(Vector2(20, 152), "信用 %d  ·  遭遇 %d/%d" % [credits, cleared, total], 11, TEXT)
+		_text(Vector2(20, 152), "金币 %d  ·  遭遇 %d/%d" % [credits, cleared, total], 11, TEXT)
 		var zone := str(_controller.get("water_zone"))
 		var water_hint := "水边谨慎 · M 查看地图"
 		var accent := MUTED
@@ -108,7 +108,7 @@ func _draw() -> void:
 	_text(Vector2(705, 65), "关闭  M", 12, TEXT)
 	_draw_city(MAP, true)
 	draw_rect(MAP, Color("3e6071"), false, 1)
-	_text(Vector2(584, 105), "信用 %d" % credits, 16, TEAL)
+	_text(Vector2(584, 105), "金币 %d" % credits, 16, TEAL)
 	_text(Vector2(584, 132), "已清理遭遇 %d/%d" % [cleared, total], 12, TEXT)
 	var index := 0
 	for kind in ["residential", "shop", "factory", "medical", "police"]:
@@ -124,7 +124,7 @@ func _draw() -> void:
 	_text(Vector2(605, 371), "当前位置", 12, TEXT)
 	_text(Vector2(584, 410), "浅水可站立", 11, Color("7cc8d9"))
 	_text(Vector2(584, 430), "深水会迷失", 11, DANGER)
-	_text(Vector2(204, 463), "查看期间暂停 · E 在建筑门口交互 · M / Esc 返回", 11, MUTED)
+	_text(Vector2(204, 463), "查看期间暂停 · E 贴近建筑交互 · M / Esc 返回", 11, MUTED)
 	_text(Vector2(204, 483), "R  重试本图  ·  N  生成新地图", 11, MUTED)
 
 
@@ -139,7 +139,13 @@ func _draw_city(rect: Rect2, expanded: bool) -> void:
 		return
 	draw_rect(rect, Color("285265"))
 	draw_rect(_world_rect(land, rect, bounds), Color("263540"))
-	# Street gaps are the dark land between the grid's building footprints.
+	# The map follows the same complete ground graph, including bent routes.
+	for route: Dictionary in city_map.get("bridge_data"):
+		var points: Array = route.get("ground_points", [])
+		for index in range(points.size() - 1):
+			var start: Vector3 = points[index]
+			var finish: Vector3 = points[index + 1]
+			draw_line(_world_point(Vector2(start.x, start.z), rect, bounds), _world_point(Vector2(finish.x, finish.z), rect, bounds), Color("536774"), 2.0 if expanded else 1.0, true)
 	var buildings: Array = city_map.get("building_data")
 	var fallback_width := float(city_map.get("block_size")) - float(city_map.get("road_width"))
 	for building: Dictionary in buildings:

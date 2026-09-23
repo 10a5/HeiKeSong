@@ -21,6 +21,7 @@ MODELS = {
     "residential_2": "居民楼3.glb", "residential_3": "居民楼4.glb",
     "residential_4": "居民楼5.glb", "factory_0": "工厂1.glb",
     "factory_1": "工业机房楼.glb", "shop": "商店.glb",
+    "medical": "医疗点.glb",
 }
 
 
@@ -124,13 +125,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--faces", type=int, default=14000)
+    parser.add_argument("--model", action="append", choices=sorted(MODELS),
+                        help="Bake only the named model; may be supplied more than once")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
     args.output.mkdir(parents=True, exist_ok=True)
     project = Path(__file__).resolve().parent.parent
     # The original vertex-coloured tower contains many separate window ledges;
     # retaining more triangles prevents collapse from erasing whole components.
-    reports = {key: bake(project / "model" / model, args.output / f"{key}.tres", max(args.faces, 60000) if key == "residential_0" else args.faces)
-               for key, model in MODELS.items()}
+    selected = args.model or list(MODELS)
+    reports = {key: bake(project / "model" / MODELS[key], args.output / f"{key}.tres",
+                         max(args.faces, 60000) if key == "residential_0" else args.faces)
+               for key in selected}
     (args.output / "manifest.json").write_text(json.dumps(reports, ensure_ascii=False, indent=2) + "\n")
 
 

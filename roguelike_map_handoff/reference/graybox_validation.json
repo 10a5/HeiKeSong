@@ -1,0 +1,85 @@
+{
+  "seeds": [
+    {
+      "diagonals": 8,
+      "elbows": 2,
+      "links": 22,
+      "road_nodes": 40,
+      "seed": 20260923,
+      "segments": 24
+    },
+    {
+      "diagonals": 9,
+      "elbows": 3,
+      "links": 26,
+      "road_nodes": 40,
+      "seed": 20260924,
+      "segments": 29
+    },
+    {
+      "diagonals": 10,
+      "elbows": 3,
+      "links": 26,
+      "road_nodes": 40,
+      "seed": 20260925,
+      "segments": 29
+    },
+    {
+      "diagonals": 8,
+      "elbows": 4,
+      "links": 22,
+      "road_nodes": 40,
+      "seed": 20260926,
+      "segments": 26
+    },
+    {
+      "diagonals": 7,
+      "elbows": 5,
+      "links": 25,
+      "road_nodes": 40,
+      "seed": 20260927,
+      "segments": 30
+    },
+    {
+      "diagonals": 10,
+      "elbows": 2,
+      "links": 25,
+      "road_nodes": 40,
+      "seed": 20260928,
+      "segments": 27
+    },
+    {
+      "diagonals": 10,
+      "elbows": 3,
+      "links": 22,
+      "road_nodes": 40,
+      "seed": 20260929,
+      "segments": 25
+    },
+    {
+      "diagonals": 7,
+      "elbows": 2,
+      "links": 23,
+      "road_nodes": 40,
+      "seed": 20260930,
+      "segments": 25
+    },
+    {
+      "diagonals": 9,
+      "elbows": 5,
+      "links": 22,
+      "road_nodes": 40,
+      "seed": 20260931,
+      "segments": 27
+    },
+    {
+      "diagonals": 11,
+      "elbows": 6,
+      "links": 25,
+      "road_nodes": 40,
+      "seed": 20260932,
+      "segments": 31
+    }
+  ],
+  "unique_graphs": 10
+}

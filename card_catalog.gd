@@ -9,15 +9,15 @@ const STARTING_UNLOCKS: Array[String] = ["slash", "shield", "roll", "dash_slash"
 const CARDS: Dictionary = {
 	"punch": {"name": "快拳", "category": "attack", "cost": 1.0, "effect": "近距离快速出拳\n可接其他攻击"},
 	"slash": {"name": "出拳", "category": "attack", "cost": 2.0, "effect": "向前方强力出拳\n可与翻滚衔接"},
-	"front_kick": {"name": "回旋踢", "category": "attack", "cost": 2.0, "effect": "回旋踢击周围2米\n造成50点范围伤害\n动作期间无法移动或出牌"},
+	"front_kick": {"name": "回旋踢", "category": "attack", "cost": 2.0, "effect": "回旋踢击周围2米\n0.8秒后造成50点范围伤害\n动作期间无法移动或出牌"},
 	"sweep": {"name": "扫腿", "category": "attack", "cost": 2.0, "effect": "低身横扫前方\n可打断近身敌人"},
 	"shot": {"name": "点射", "category": "attack", "cost": 2.0, "effect": "朝面向直线射击\n可在移动后追击"},
 	"charged_slash": {"name": "蓄力重劈", "category": "attack", "cost": 3.0, "effect": "短暂蓄力后重击\n近距离高伤害"},
-	"shield": {"name": "生成护盾", "category": "defense", "cost": 2.0, "effect": "获得10点护盾，可叠加\n每0.5秒衰减1点"},
+	"shield": {"name": "生成护盾", "category": "defense", "cost": 2.0, "effect": "获得10点护盾，可叠加\n每0.2秒衰减1点"},
 	"roll": {"name": "翻滚", "category": "movement", "cost": 3.0, "effect": "翻滚期间躲避伤害\n可同时接一张攻击"},
 	"blink": {"name": "短距闪现", "category": "movement", "cost": 3.0, "effect": "向输入方向闪现\n无法穿过墙体"},
 	"jet_jump": {"name": "喷射跃升", "category": "movement", "cost": 2.0, "effect": "向上喷射跃升\n可接空中动作"},
-	"dash_slash": {"name": "突进出拳", "category": "hybrid", "cost": 5.0, "effect": "快速向前突进\n接近敌人后出拳"},
+	"dash_slash": {"name": "突进出拳", "category": "hybrid", "cost": 5.0, "effect": "沿突进路径造成45点伤害\n末端追加出拳"},
 	"airborne_slash": {"name": "腾空斩", "category": "hybrid", "cost": 4.0, "effect": "起跳向前挥斩\n可接俯冲重斩"},
 	"dive_slash": {"name": "俯冲重斩", "category": "hybrid", "cost": 5.0, "effect": "腾空后向前俯冲\n落地造成范围伤害"},
 }

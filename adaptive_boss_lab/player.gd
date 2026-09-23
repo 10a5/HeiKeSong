@@ -802,7 +802,7 @@ func take_damage(amount: float) -> bool:
 		status_changed.emit("训练失败 · 按 R 重试", true)
 		defeated.emit()
 	elif applied > 0.0:
-		status_changed.emit("受到劈砍 −%.0f 生命 · 落刀前翻滚" % applied, true)
+		status_changed.emit("受到攻击 −%.0f 生命" % applied, true)
 	else:
 		status_changed.emit("护盾吸收 %.0f 伤害" % absorbed, false)
 	_update_model(Vector3.ZERO)

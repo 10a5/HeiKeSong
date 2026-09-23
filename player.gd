@@ -24,8 +24,9 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "front_kick", "s
 @export var gravity: float = 24.0
 @export var max_fall_speed: float = 30.0
 @export_range(0.0, 0.5, 0.01) var max_step_height: float = 0.30
-## The roll keeps its authored duration while covering twice the previous distance.
-@export var roll_speed: float = 14.0
+## The roll keeps its authored duration while covering two-thirds of the
+## previous 6.16 metre travel distance, about 4.11 metres.
+@export var roll_speed: float = 9.333333
 @export var roll_duration: float = 0.44
 @export var dash_speed: float = 16.0
 @export var dash_duration: float = 0.24
@@ -41,7 +42,7 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "front_kick", "s
 @export var radius: float = 0.35
 @export_group("Combat")
 @export var max_health: float = 100.0
-@export_range(0.05, 10.0, 0.05) var shield_decay_interval: float = 0.5
+@export_range(0.05, 10.0, 0.05) var shield_decay_interval: float = 0.2
 @export var slash_damage: float = 25.0
 @export var dash_slash_damage: float = 45.0
 @export var slash_reach: float = 2.1
@@ -59,6 +60,7 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "front_kick", "s
 @export var front_kick_damage: float = 50.0
 @export var front_kick_radius: float = 2.0
 @export var front_kick_hit_duration: float = 0.18
+@export_range(0.0, 2.0, 0.05) var front_kick_damage_delay: float = 0.8
 ## The kick remains locked for its complete accelerated visual action.
 @export_range(0.1, 2.0, 0.05) var front_kick_action_duration: float = 0.9
 @export var shield_per_card: float = 10.0
@@ -124,8 +126,11 @@ var dash_direction: Vector3 = Vector3.FORWARD
 var dash_time_left: float = 0.0
 var slash_time_left: float = 0.0
 var front_kick_lock_time_left: float = 0.0
+var front_kick_damage_delay_left: float = 0.0
+var front_kick_damage_fired: bool = false
 var slash_direction: Vector3 = Vector3.FORWARD
 var _dash_slash_started: bool = false
+var _dash_targets_hit: Array[int] = []
 var _slash_is_dash: bool = false
 var _active_slash_duration: float = 0.14
 ## Monotonically increasing token for visual action clips.  Gameplay actions
@@ -152,13 +157,43 @@ var _implant_material: StandardMaterial3D
 var _cybernetic_ring: MeshInstance3D
 var _cybernetic_trail_clock: float = 0.0
 var _step_support_active: bool = false
+var _implant_base_stats: Dictionary = {}
+var implant_damage_multiplier: float = 1.0
+var implant_damage_reduction_multiplier: float = 1.0
 
 
 func _ready() -> void:
 	collision_layer = 2
 	collision_mask = 1
+	_capture_implant_base_stats()
 	_build_model()
 	reset_player()
+
+
+func _capture_implant_base_stats() -> void:
+	if _implant_base_stats.is_empty():
+		_implant_base_stats = {
+			"move_speed": move_speed,
+			"max_energy": max_energy,
+			"energy_regen_per_second": energy_regen_per_second,
+		}
+
+
+func apply_implant_bonuses(bonuses: Dictionary) -> void:
+	# Recompute from authored values every time, including unequip and sale.
+	_capture_implant_base_stats()
+	implant_damage_multiplier = 1.0 + maxf(0.0, float(bonuses.get("damage_bonus", 0.0)))
+	implant_damage_reduction_multiplier = clampf(float(bonuses.get("damage_reduction_multiplier", 1.0)), 0.0, 1.0)
+	move_speed = float(_implant_base_stats["move_speed"]) * (1.0 + maxf(0.0, float(bonuses.get("move_speed_bonus", 0.0))))
+	max_energy = float(_implant_base_stats["max_energy"]) * (1.0 + maxf(0.0, float(bonuses.get("energy_capacity_bonus", 0.0))))
+	energy_regen_per_second = float(_implant_base_stats["energy_regen_per_second"]) * (1.0 + maxf(0.0, float(bonuses.get("energy_regen_bonus", 0.0))))
+	# A larger battery grants capacity, never free energy. Removing one clamps it.
+	energy = minf(energy, max_energy)
+	energy_changed.emit(energy, max_energy)
+
+
+func get_attack_damage(base_damage: float) -> float:
+	return base_damage * implant_damage_multiplier
 
 
 func reset_player() -> void:
@@ -192,6 +227,9 @@ func reset_player() -> void:
 	dash_time_left = 0.0
 	slash_time_left = 0.0
 	front_kick_lock_time_left = 0.0
+	front_kick_damage_delay_left = 0.0
+	front_kick_damage_fired = false
+	_dash_targets_hit.clear()
 	cybernetic_time_left = 0.0
 	cybernetic_cooldown_left = 0.0
 	_cybernetic_trail_clock = 0.0
@@ -504,6 +542,8 @@ func request_card(kind: String) -> bool:
 		"front_kick":
 			# A full-circle area hit uses the same one-hit-per-target, height and
 			# wall checks as the existing melee system.
+			front_kick_damage_delay_left = maxf(front_kick_damage_delay, 0.0)
+			front_kick_damage_fired = false
 			_start_melee(direction, kind, front_kick_damage, front_kick_radius, front_kick_hit_duration, PI, melee_vertical_reach)
 			front_kick_lock_time_left = maxf(front_kick_action_duration, front_kick_hit_duration)
 			_spawn_ring(Color("ffd087"), front_kick_radius, front_kick_hit_duration)
@@ -536,6 +576,12 @@ func request_card(kind: String) -> bool:
 			dash_direction = direction
 			is_dashing = true
 			dash_time_left = dash_duration
+			_dash_targets_hit.clear()
+			slash_direction = direction
+			_active_melee_damage = dash_slash_damage
+			_active_melee_reach = dash_slash_reach
+			_active_melee_half_angle = PI
+			_active_melee_vertical_reach = melee_vertical_reach
 			_dash_slash_started = false
 			_trail_clock = 0.0
 			_add_trail()
@@ -593,9 +639,19 @@ func _start_slash_visual(direction: Vector3, from_dash: bool, combo: bool = fals
 	_slash_is_combo = combo and not from_dash
 	var duration := 0.24 if from_dash else (combo_slash_duration if _slash_is_combo else slash_visual_duration)
 	_start_melee(direction, "dash_slash" if from_dash else "slash", dash_slash_damage if from_dash else slash_damage, dash_slash_reach if from_dash else slash_reach, duration, slash_half_angle, melee_vertical_reach)
+	if from_dash:
+		# Preserve path hits when the follow-up punch window begins so a target
+		# crossed during the dash cannot be damaged a second time at the endpoint.
+		for target_id in _dash_targets_hit:
+			if target_id not in _slash_targets_hit:
+				_slash_targets_hit.append(target_id)
 
 
 func _start_melee(direction: Vector3, kind: String, damage: float, reach: float, duration: float, half_angle: float, vertical_reach: float) -> void:
+	var preserved_dash_hits: Array[int] = []
+	if kind == "dash_slash":
+		for target_id in _dash_targets_hit:
+			preserved_dash_hits.append(int(target_id))
 	slash_direction = direction
 	_active_attack_kind = kind
 	_slash_is_dash = kind == "dash_slash"
@@ -606,6 +662,8 @@ func _start_melee(direction: Vector3, kind: String, damage: float, reach: float,
 	_active_melee_vertical_reach = vertical_reach
 	slash_time_left = duration
 	_slash_targets_hit.clear()
+	if not preserved_dash_hits.is_empty():
+		_slash_targets_hit.append_array(preserved_dash_hits)
 	var color := Color("ffae48")
 	if kind == "punch" or kind == "slash":
 		color = Color("fff6b0")
@@ -625,8 +683,14 @@ func _start_melee(direction: Vector3, kind: String, damage: float, reach: float,
 
 
 func _apply_slash_hits() -> void:
-	if is_dead or slash_time_left <= 0.0 or get_tree().paused:
+	if is_dead or get_tree().paused:
 		return
+	if _active_attack_kind == "front_kick":
+		if front_kick_damage_fired or front_kick_damage_delay_left > 0.0:
+			return
+	else:
+		if slash_time_left <= 0.0:
+			return
 	for target in get_tree().get_nodes_in_group("combat_targets"):
 		if not target is Node3D or not target.has_method("take_damage"):
 			continue
@@ -634,8 +698,46 @@ func _apply_slash_hits() -> void:
 		if target_id in _slash_targets_hit:
 			continue
 		if COMBAT.can_hit(self, target, slash_direction, _active_melee_reach, _active_melee_half_angle, _active_melee_vertical_reach):
-			if bool(target.call("take_damage", _active_melee_damage)):
+			if bool(target.call("take_damage", get_attack_damage(_active_melee_damage))):
 				_slash_targets_hit.append(target_id)
+				if _active_attack_kind == "dash_slash" and target_id not in _dash_targets_hit:
+					_dash_targets_hit.append(target_id)
+	if _active_attack_kind == "front_kick":
+		front_kick_damage_fired = true
+
+
+func _apply_dash_path_hits(previous_position: Vector3) -> void:
+	if is_dead or get_tree().paused:
+		return
+	var segment := global_position - previous_position
+	var segment_xz := Vector3(segment.x, 0.0, segment.z)
+	var segment_length_squared := segment_xz.length_squared()
+	for target in get_tree().get_nodes_in_group("combat_targets"):
+		if not target is Node3D or not target.has_method("take_damage"):
+			continue
+		var target_id := target.get_instance_id()
+		if target_id in _dash_targets_hit:
+			continue
+		var target_position: Vector3 = target.global_position
+		if absf(target_position.y - global_position.y) > melee_vertical_reach:
+			continue
+		var nearest := previous_position
+		if segment_length_squared > 0.000001:
+			var along := clampf(Vector3(target_position.x - previous_position.x, 0.0, target_position.z - previous_position.z).dot(segment_xz) / segment_length_squared, 0.0, 1.0)
+			nearest = previous_position + segment * along
+		var target_radius: float = float(target.get("radius")) if target.get("radius") != null else 0.35
+		var path_radius := radius + target_radius + 0.2
+		if Vector2(target_position.x - nearest.x, target_position.z - nearest.z).length() > path_radius:
+			continue
+		var ray := PhysicsRayQueryParameters3D.create(nearest + Vector3.UP * 0.85, target_position + Vector3.UP * 0.85, 1)
+		var exclusions: Array[RID] = [get_rid()]
+		if target is CollisionObject3D:
+			exclusions.append(target.get_rid())
+		ray.exclude = exclusions
+		if not get_world_3d().direct_space_state.intersect_ray(ray).is_empty():
+			continue
+		if bool(target.call("take_damage", get_attack_damage(dash_slash_damage))):
+			_dash_targets_hit.append(target_id)
 
 
 func _update_charge(delta: float) -> void:
@@ -661,7 +763,7 @@ func _fire_shot(direction: Vector3) -> void:
 		end = hit["position"]
 		var target: Object = hit["collider"]
 		if is_instance_valid(target) and target.has_method("take_damage"):
-			target.call("take_damage", shot_damage)
+			target.call("take_damage", get_attack_damage(shot_damage))
 	var length := origin.distance_to(end)
 	if length <= 0.001:
 		return
@@ -706,7 +808,7 @@ func _advance_dive(delta: float) -> void:
 		for target in get_tree().get_nodes_in_group("combat_targets"):
 			if target is Node3D and target.has_method("take_damage"):
 				if COMBAT.can_hit(self, target, dive_direction, dive_radius, PI, 1.3):
-					target.call("take_damage", dive_slash_damage)
+					target.call("take_damage", get_attack_damage(dive_slash_damage))
 		_spawn_ring(Color("ce8bff"), dive_radius, 0.20)
 		combo_window_left = combo_window_duration
 		jet_jump_used = false
@@ -735,6 +837,8 @@ func _spawn_ring(color: Color, effect_radius: float, duration: float) -> void:
 func _clear_extra_actions() -> void:
 	charge_time_left = 0.0
 	front_kick_lock_time_left = 0.0
+	front_kick_damage_delay_left = 0.0
+	front_kick_damage_fired = false
 	is_diving = false
 	dive_startup_left = 0.0
 	jet_jump_used = false
@@ -742,6 +846,7 @@ func _clear_extra_actions() -> void:
 	air_move_time_left = 0.0
 	air_move_speed = 0.0
 	_roll_attack_used = false
+	_dash_targets_hit.clear()
 	_active_attack_kind = "slash"
 	for effect in _action_effects:
 		if is_instance_valid(effect["node"]):
@@ -764,7 +869,7 @@ func _update_shield_decay(delta: float) -> void:
 		_shield_decay_elapsed = 0.0
 		return
 	# Keep fractional time between frames and additions. A long frame must
-	# consume every elapsed half-second instead of slowing down the decay.
+	# consume every elapsed 0.2-second decay tick instead of slowing down the decay.
 	_shield_decay_elapsed += maxf(0.0, delta)
 	var interval := maxf(0.05, shield_decay_interval)
 	var ticks := floori((_shield_decay_elapsed + 0.000001) / interval)
@@ -777,10 +882,12 @@ func _update_shield_decay(delta: float) -> void:
 	shield_changed.emit(shield)
 
 
-func take_damage(amount: float) -> bool:
+func take_damage(amount: float, ignore_damage_reduction: bool = false) -> bool:
 	# A roll has a short, explicit evasion window; walking and dash-slash do not.
 	if is_dead or get_tree().paused or is_rolling or amount <= 0.0:
 		return false
+	if not ignore_damage_reduction:
+		amount *= implant_damage_reduction_multiplier
 	var absorbed := minf(amount, shield)
 	if absorbed > 0.0:
 		shield = maxf(0.0, shield - absorbed)
@@ -825,16 +932,16 @@ func become_lost() -> void:
 	if is_dead or get_tree().paused:
 		return
 	is_rolling = false
-	# Deep-water loss remains lethal even while a temporary shield is active.
-	take_damage(health + shield)
+	# Environmental loss bypasses accessories as well as temporary shields.
+	take_damage(health + shield, true)
 	velocity = Vector3.ZERO
 	set_physics_process(false)
 	status_changed.emit("沉入深水 · 意识迷失", true)
 
 
 func _advance_roll(delta: float) -> void:
-	# Keep the authored roll timeline unchanged while doubling its physical travel
-	# from about 3.08 m to about 6.16 m.
+	# Keep the authored roll timeline unchanged while covering two-thirds of the
+	# previous 6.16 m travel distance, about 4.11 m in an unobstructed direction.
 	var step := minf(delta, roll_time_left)
 	var frame_speed := roll_speed * (step / delta if delta > 0.0 else 0.0)
 	velocity.x = roll_direction.x * frame_speed
@@ -864,16 +971,18 @@ func _advance_roll(delta: float) -> void:
 func _advance_dash(delta: float) -> void:
 	# Damage starts with the follow-up slash; the card spends and emits once.
 	var step := minf(delta, dash_time_left)
+	var previous_position := global_position
 	var frame_speed := dash_speed * (step / delta if delta > 0.0 else 0.0)
 	velocity.x = dash_direction.x * frame_speed
 	velocity.z = dash_direction.z * frame_speed
 	move_and_slide()
 	_clamp_to_arena()
+	_apply_dash_path_hits(previous_position)
 	dash_time_left = maxf(0.0, dash_time_left - step)
 	if not _dash_slash_started and dash_time_left <= dash_duration * 0.5:
 		_dash_slash_started = true
 		_start_slash_visual(dash_direction, true)
-		status_changed.emit("突进出拳 · 接近后命中", false)
+		status_changed.emit("突进出拳 · 路径命中", false)
 	_trail_clock += step
 	if _trail_clock >= 0.035:
 		_trail_clock = 0.0
@@ -896,6 +1005,10 @@ func _clamp_to_arena() -> void:
 func _update_visual_timers(delta: float) -> void:
 	slash_time_left = maxf(0.0, slash_time_left - delta)
 	front_kick_lock_time_left = maxf(0.0, front_kick_lock_time_left - delta)
+	if front_kick_damage_delay_left > 0.0:
+		front_kick_damage_delay_left = maxf(0.0, front_kick_damage_delay_left - delta)
+		if front_kick_damage_delay_left <= 0.0:
+			_apply_slash_hits()
 	for index in range(_action_effects.size() - 1, -1, -1):
 		_action_effects[index]["life"] = float(_action_effects[index]["life"]) - delta
 		var effect: Dictionary = _action_effects[index]

@@ -111,12 +111,15 @@ func _test_costs_and_recovery() -> void:
 	await _steps(10)
 	_check(_near(player.slash_time_left, 0.0), "Slash feedback expires automatically")
 	player.reset_player()
+	scene.get("enemy").global_position = Vector3(0.0, 0.0, 7.0)
+	player.position = Vector3(0.0, 0.0, 2.0)
+	var roll_start: Vector3 = player.position
 	_check(player.request_card("roll"), "Roll can be played at full energy")
 	_check(_near(player.energy, 7.0), "Roll costs exactly 3 energy")
 	_check(player.is_rolling and _near(player.roll_time_left, 0.44), "Roll starts with its 0.44-second lifetime")
 	await _steps(30)
 	_check(not player.is_rolling, "Roll completes automatically")
-	_check(_xz_distance(player.position, SPAWN) > 6.0 and _xz_distance(player.position, SPAWN) < 6.3, "Roll travels 14 units/second for 0.44 seconds")
+	_check(_xz_distance(player.position, roll_start) > 4.0 and _xz_distance(player.position, roll_start) < 4.2, "Roll travels 9.333 units/second for 0.44 seconds")
 	_check(absf(player.position.y - SPAWN.y) < 0.1, "Roll remains grounded")
 	player.reset_player()
 	player.energy = 1.5
@@ -878,7 +881,10 @@ func _test_cybernetic_action_speeds() -> void:
 	for kind in ["roll", "dash_slash"]:
 		player.reset_player()
 		player.movement_yaw = 0.0
+		player.position = Vector3(0.0, 0.0, 2.0)
+		scene.get("enemy").global_position = Vector3(0.0, 0.0, 7.0)
 		deck.reset_deck(2323)
+		var action_start: Vector3 = player.position
 		player.request_card(kind)
 		var action_timer: float = player.roll_time_left if kind == "roll" else player.dash_time_left
 		var energy_before: float = player.energy
@@ -893,11 +899,11 @@ func _test_cybernetic_action_speeds() -> void:
 		else:
 			_check(not player.request_card("slash"), "Boost activation does not allow another card to bypass the %s lock" % kind)
 		await _steps(4)
-		var expected_speed := 14.0 if kind == "roll" else 16.0
+		var expected_speed := 9.333333 if kind == "roll" else 16.0
 		_check(_near(_horizontal(player.velocity).length(), expected_speed, 0.001), "Boost does not multiply the fixed %s speed" % kind)
 		await _steps(30 if kind == "roll" else 16)
-		var expected_distance := 6.16 if kind == "roll" else 3.84
-		_check(_near(_xz_distance(player.position, SPAWN), expected_distance, 0.06) and not player.is_action_locked() and player.is_cybernetic_active, "%s keeps its normal distance and finishes while boost remains active" % kind)
+		var expected_distance := 4.106667 if kind == "roll" else 3.84
+		_check(_near(_xz_distance(player.position, action_start), expected_distance, 0.06) and not player.is_action_locked() and player.is_cybernetic_active, "%s keeps its normal distance and finishes while boost remains active" % kind)
 	player.reset_player()
 	if _main_process_was_enabled:
 		scene.set_process(true)
@@ -1052,16 +1058,18 @@ func _test_turn_angle_speed() -> void:
 		_release_all()
 		player.reset_player()
 		player.movement_yaw = 0.0
+		player.position = Vector3(0.0, 0.0, -2.0)
+		scene.get("enemy").global_position = Vector3(0.0, 0.0, 7.0)
 		await _steps(2)
 		Input.action_press("move_down")
 		_check(player.request_card(kind), "Reverse-facing %s begins normally" % kind)
 		_release_all()
 		await _steps(1)
-		var expected_speed := 14.0 if kind == "roll" else 16.0
+		var expected_speed := 9.333333 if kind == "roll" else 16.0
 		_check(absf(wrapf(model_heading.rotation.y - PI, -PI, PI)) > deg_to_rad(160.0) and _near(_horizontal(player.velocity).length(), expected_speed, 0.001), "%s keeps its fixed speed even while the model is nearly opposite its travel direction" % kind)
 		await _steps(30 if kind == "roll" else 19)
-		var expected_distance := 6.16 if kind == "roll" else 3.84
-		_check(_near(_xz_distance(player.position, SPAWN), expected_distance, 0.06), "Turning does not shorten the fixed %s travel distance" % kind)
+		var expected_distance := 4.106667 if kind == "roll" else 3.84
+		_check(_near(_xz_distance(player.position, Vector3(0.0, 0.0, -2.0)), expected_distance, 0.06), "Turning does not shorten the fixed %s travel distance" % kind)
 
 	for sign_value in [-1.0, 1.0]:
 		_release_all()
