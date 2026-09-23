@@ -17,6 +17,7 @@ const CYBERNETIC_PANEL := Rect2(736.0, 14.0, 206.0, 68.0)
 const CYBERNETIC_BAR := Rect2(744.0, 56.0, 190.0, 3.0)
 const ENERGY_BAR := Rect2(268.0, 529.0, 424.0, 6.0)
 const HEALTH_BAR := Rect2(20.0, 84.0, 174.0, 5.0)
+const SHIELD_BAR := Rect2(20.0, 115.0, 174.0, 5.0)
 const CARD_SIZE := Vector2(100.0, 80.0)
 const CARD_GAP := 8.0
 const HAND_ORIGIN := Vector2(268.0, 424.0)
@@ -43,6 +44,8 @@ var current_energy := 10.0
 var max_energy := 10.0
 var current_health := 100.0
 var max_health := 100.0
+var current_shield := 0.0
+var _shield_display_max := 10.0
 var status_text := "选择手牌"
 var status_is_error := false
 var last_action := "—"
@@ -93,6 +96,7 @@ func setup(actor: CharacterBody3D, card_deck: Node) -> void:
 	_disconnect_signal(player, "status_changed", _on_status_changed)
 	_disconnect_signal(player, "cybernetic_changed", _on_cybernetic_changed)
 	_disconnect_signal(player, "health_changed", _on_health_changed)
+	_disconnect_signal(player, "shield_changed", _on_shield_changed)
 	_disconnect_signal(player, "damaged", _on_damaged)
 	_disconnect_signal(player, "defeated", _on_defeated)
 	_disconnect_signal(deck, "piles_changed", _on_piles_changed)
@@ -111,6 +115,8 @@ func setup(actor: CharacterBody3D, card_deck: Node) -> void:
 	_cybernetic_active = false
 	current_health = 100.0
 	max_health = 100.0
+	current_shield = 0.0
+	_shield_display_max = 10.0
 	_player_defeated = false
 	_damage_flash = 0.0
 	_last_damage = 0.0
@@ -124,6 +130,9 @@ func setup(actor: CharacterBody3D, card_deck: Node) -> void:
 		if player.has_signal("health_changed"):
 			player.connect("health_changed", _on_health_changed)
 			_on_health_changed(float(player.get("health")), float(player.get("max_health")))
+		if player.has_signal("shield_changed"):
+			player.connect("shield_changed", _on_shield_changed)
+			_on_shield_changed(float(player.get("shield")))
 		if player.has_signal("damaged"):
 			player.connect("damaged", _on_damaged)
 		if player.has_signal("defeated"):
@@ -289,7 +298,9 @@ func _create_interface() -> void:
 	_add_label("camera_hint", _camera_hint, Vector2(20, 42), 10, TEXT)
 	_add_label("health", "生命  100 / 100", Vector2(20, 63), 12, TEXT)
 	_add_label("damage", "", Vector2(204, 63), 12, RED)
-	_add_label("combat_tip", "抬手时翻滚", Vector2(20, 96), 10, TEXT)
+	_add_label("shield", "护盾  0", Vector2(20, 94), 12, BLUE)
+	_add_label("shield_decay", "", Vector2(97, 98), 9, BLUE)
+	_add_label("combat_tip", "抬手时翻滚", Vector2(20, 126), 10, TEXT)
 	_add_label("cybernetic_key", "Q", Vector2(750, 23), 14, TEAL)
 	_add_label("cybernetic_title", "爆发加速", Vector2(775, 18), 14, TEXT)
 	_add_label("cybernetic_state", "可用 · 按 Q 激活", Vector2(775, 38), 10, TEAL)
@@ -388,6 +399,8 @@ func _update_dynamic_labels() -> void:
 	_labels["energy_value"].add_theme_color_override("font_color", RED if current_energy < 2.0 else TEXT)
 	_labels["health"].text = "生命  %.0f / %.0f" % [current_health, max_health]
 	_labels["health"].add_theme_color_override("font_color", RED if current_health <= max_health * 0.3 else TEXT)
+	_labels["shield"].text = "护盾  %.0f" % current_shield
+	_labels["shield_decay"].text = "−1 / 0.5 秒" if current_shield > 0.0 else ""
 	_labels["damage"].text = "−%.0f" % _last_damage if _damage_flash > 0.0 else ""
 	_labels["regen"].text = "行动已结束" if _player_defeated else "自动恢复 +%.1f / 秒" % _regen_rate()
 	_labels["status"].text = status_text
@@ -558,6 +571,15 @@ func _on_health_changed(current: float, maximum: float) -> void:
 	queue_redraw()
 
 
+func _on_shield_changed(current: float) -> void:
+	current_shield = maxf(0.0, current)
+	# Keep a stable bar while it drains; another card can grow its capacity.
+	# The number is the shield pool, not a cap on stackable protection.
+	_shield_display_max = maxf(_shield_display_max, ceilf(current_shield / 10.0) * 10.0) if current_shield > 0.0 else 10.0
+	_update_dynamic_labels()
+	queue_redraw()
+
+
 func _on_damaged(amount: float) -> void:
 	_last_damage = maxf(0.0, amount)
 	_damage_flash = 0.45
@@ -658,6 +680,7 @@ func _draw() -> void:
 	# No full-width header or hand backdrop: the arena remains visible through UI.
 	_draw_cybernetic_panel()
 	_draw_health_bar()
+	_draw_shield_bar()
 	_draw_energy_bar()
 	_draw_pile(DRAW_PILE, TEAL, _pile_count("draw_pile"), _draw_flash)
 	_draw_pile(DISCARD_PILE, PURPLE, _pile_count("discard_pile"), _discard_flash)
@@ -679,6 +702,14 @@ func _draw_health_bar() -> void:
 	if fill_ratio > 0.0:
 		draw_rect(Rect2(HEALTH_BAR.position, Vector2(HEALTH_BAR.size.x * fill_ratio, HEALTH_BAR.size.y)), RED)
 	draw_rect(HEALTH_BAR, Color(RED, 0.5), false, 1.0)
+
+
+func _draw_shield_bar() -> void:
+	draw_rect(SHIELD_BAR, Color(BG, 0.9))
+	var fill_ratio := clampf(current_shield / _shield_display_max, 0.0, 1.0)
+	if fill_ratio > 0.0:
+		draw_rect(Rect2(SHIELD_BAR.position, Vector2(SHIELD_BAR.size.x * fill_ratio, SHIELD_BAR.size.y)), BLUE)
+	draw_rect(SHIELD_BAR, Color(BLUE, 0.5), false, 1.0)
 
 
 func _draw_damage_edges() -> void:
@@ -775,6 +806,18 @@ func _draw_keycap(rect: Rect2, accent: Color) -> void:
 
 
 func _draw_card_icon(center: Vector2, kind: String, accent: Color) -> void:
+	if kind == "shield":
+		var points := PackedVector2Array([center + Vector2(0, -15), center + Vector2(13, -9), center + Vector2(10, 7), center + Vector2(0, 15), center + Vector2(-10, 7), center + Vector2(-13, -9), center + Vector2(0, -15)])
+		draw_polyline(points, accent, 2.0, true)
+		draw_line(center + Vector2(0, -7), center + Vector2(0, 7), accent, 2.0)
+		draw_line(center + Vector2(-6, 0), center + Vector2(6, 0), accent, 2.0)
+		return
+	if kind == "front_kick":
+		draw_arc(center, 18, -0.5, TAU - 1.0, 32, accent, 2.0, true)
+		draw_line(center + Vector2(-8, -10), center + Vector2(-1, 2), accent, 3.0)
+		draw_line(center + Vector2(-1, 2), center + Vector2(12, -3), accent, 3.0)
+		draw_line(center + Vector2(12, -3), center + Vector2(15, 0), accent, 3.0)
+		return
 	if kind == "punch" or kind == "slash":
 		draw_rect(Rect2(center + Vector2(-10, -8), Vector2(19, 16)), accent, false, 2.0)
 		for index in range(3):

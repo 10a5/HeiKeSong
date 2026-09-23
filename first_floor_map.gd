@@ -414,6 +414,11 @@ func _create_building(data: Dictionary) -> void:
 	_building_visuals[int(data["id"])] = {"upper": upper, "outline": outline}
 	var model_fit: Node3D = null
 	var model_collision: Shape3D = null
+	# Interaction starts from the model footprint, not from the old street
+	# marker. Greybox services keep the parcel-sized fallback below.
+	data["interaction_center"] = data["position"]
+	data["interaction_half_extents"] = Vector2(BUILDING_WIDTH * 0.5, BUILDING_DEPTH * 0.5)
+	data["interaction_radius"] = 1.15
 	if kind == "residential":
 		model_fit = _add_building_model(upper, RESIDENTIAL_MODELS[int(data.get("model_index", 0))], _model_bounds["residential_%d" % int(data.get("model_index", 0))], height)
 		model_collision = RESIDENTIAL_COLLISIONS[int(data.get("model_index", 0))]
@@ -444,11 +449,12 @@ func _create_building(data: Dictionary) -> void:
 	if model_fit != null:
 		_create_model_collision(building, model_fit, int(data["id"]), model_collision)
 		var visible_size: Vector3 = model_fit.get_meta("visible_size")
-		_create_building_identity(upper, kind, float(model_fit.get_meta("visible_height")), visible_size.x, visible_size.z)
+		data["interaction_half_extents"] = Vector2(maxf(visible_size.x * 0.5, 0.5), maxf(visible_size.z * 0.5, 0.5))
+		# This is only an invisible representative position used to choose the
+		# nearest service. E itself checks distance to the full model bounds.
+		data["interaction_position"] = data["position"] + Vector3(0.0, 0.0, float(data["interaction_half_extents"].y) + 0.35)
 	else:
 		_create_box_collision(building, int(data["id"]), height + 0.16)
-	# The highlighted strip is a visual guide only; it has no collision.
-	_box(building, "DoorPath", Vector3(2.2, 0.015, 1.8), Vector3(0.0, 0.022, BUILDING_DEPTH * 0.5 + 0.8), _materials["curb"])
 
 
 func _prepare_building_models() -> void:

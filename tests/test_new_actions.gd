@@ -1,9 +1,9 @@
 extends SceneTree
-## Real-world action checks for the seven discoverable cards.
+## Real-world action checks for discoverable actions and the shield/kick starters.
 ## Godot --headless --path . --fixed-fps 60 --script tests/test_new_actions.gd
 
 const ACTIONS: Array[String] = ["move_left", "move_right", "move_up", "move_down", "hand_1", "hand_2", "hand_3", "hand_4", "jump", "cybernetic_boost", "interact"]
-const NEW_CARDS: Dictionary = {"punch": 1.0, "shot": 2.0, "charged_slash": 3.0, "blink": 3.0, "jet_jump": 2.0, "airborne_slash": 4.0, "dive_slash": 5.0}
+const NEW_CARDS: Dictionary = {"punch": 1.0, "sweep": 2.0, "shot": 2.0, "charged_slash": 3.0, "blink": 3.0, "jet_jump": 2.0, "airborne_slash": 4.0, "dive_slash": 5.0, "shield": 2.0, "front_kick": 2.0}
 const START := Vector3(0.0, 0.0, 2.0)
 const FAR_TARGET := Vector3(7.0, 0.0, -6.0)
 
@@ -31,6 +31,7 @@ func _run() -> void:
 	await _steps(2)
 	await _test_costs_and_rejection()
 	await _test_punch()
+	await _test_front_kick_area()
 	await _test_shot()
 	await _test_heavy_slash()
 	await _test_blink()
@@ -82,6 +83,37 @@ func _test_punch() -> void:
 	player.request_card("punch")
 	await _steps(8)
 	_check(_near(enemy.health, 100.0), "A solid wall blocks punch damage")
+	wall.queue_free()
+	await _steps(2)
+
+
+func _test_front_kick_area() -> void:
+	# The roundhouse is intentionally radial: a target beside or behind the
+	# player is still hit, while a target outside two metres is untouched.
+	await _reset(START, Vector3(1.0, 0.0, 2.0))
+	_check(player.request_card("front_kick"), "Front kick starts beside the player")
+	var locked_energy: float = player.energy
+	var locked_position: Vector3 = player.global_position
+	_check(player.is_action_locked(), "Front kick locks movement for its accelerated action")
+	_check(not player.request_card("punch") and not player.request_card("shield") and not player.request_card("roll"), "Front kick rejects every other card while active")
+	_check(_near(player.energy, locked_energy), "Rejected cards during front kick do not spend energy")
+	Input.action_press("move_right")
+	await _steps(4)
+	Input.action_release("move_right")
+	_check(_horizontal_distance(player.global_position, locked_position) < 0.02, "Front kick holds the player in place")
+	_check(_near(enemy.health, 50.0), "Front kick deals 50 area damage to a side target")
+	await _steps(14)
+	_check(_near(enemy.health, 50.0), "Front kick damages each target only once")
+	await _steps(40)
+	_check(not player.is_action_locked(), "Front kick unlocks after its complete animation window")
+	await _reset(START, Vector3(0.0, 0.0, 4.5))
+	player.request_card("front_kick")
+	_check(_near(enemy.health, 100.0), "Front kick does not reach targets outside its two metre radius")
+	await _reset(START, Vector3(1.0, 0.0, 2.0))
+	var wall := _make_wall(Vector3(0.5, 1.3, 2.0), Vector3(0.12, 2.6, 3.0))
+	await _steps(2)
+	player.request_card("front_kick")
+	_check(_near(enemy.health, 100.0), "Front kick area damage respects a solid wall")
 	wall.queue_free()
 	await _steps(2)
 
@@ -272,7 +304,7 @@ func _test_roll_attacks() -> void:
 		var energy_after: float = player.energy
 		_check(not player.request_card("slash") and _near(player.energy, energy_after), "A roll accepts only one simultaneous attack (%s)" % kind)
 		_check(not player.take_damage(20.0), "A roll combined with %s retains its evasion window" % kind)
-		await _steps(24)
+		await _steps(28)
 		_check(not player.is_rolling and not player.is_action_locked(), "Roll plus %s releases action control normally" % kind)
 
 

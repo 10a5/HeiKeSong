@@ -71,6 +71,7 @@ func _run() -> void:
 	_test_walk_joint_trajectories()
 	await _test_attack_pose()
 	await _test_new_card_animation_mapping()
+	_test_front_kick_animation_mapping()
 	await _test_action_animation_completion()
 	await _test_roll_and_slash_chain()
 	await _test_pause_and_reset()
@@ -381,6 +382,71 @@ func _test_action_animation_completion() -> void:
 				_check(absf(animation_player.current_animation_position - expected_end) < 0.06, "%s stops at the trimmed punch segment end" % card)
 		await _steps(3)
 		_check(animation_player.current_animation in ["idle", "run"], "%s returns to locomotion after its clip finishes" % card)
+
+
+func _test_front_kick_animation_mapping() -> void:
+	var authored_player := visual.get("animation_player") as AnimationPlayer
+	if authored_player == null:
+		_check(false, "Front kick mapping has an AnimationPlayer")
+		return
+	var authored_kick: String = visual.call("_resolve_animation_name", "front_kick")
+	if authored_kick.is_empty():
+		print("FRONT KICK ASSET: current GLB has no authored front kick; fixture below only tests playback wiring.")
+		visual.call("reset_pose")
+		visual.call("apply_state", {"state": "front_kick", "action_visual_token": 900, "action_duration": 0.18})
+		_check(authored_player.current_animation == "idle", "Missing front kick stays idle instead of substituting another attack")
+		_check(not bool(visual.get("_visual_action_active")), "Missing front kick does not invent a visual action tail")
+	else:
+		_check(authored_kick != String(visual.call("_resolve_animation_name", "sweep")), "Authored front kick remains separate from sweep")
+
+	# Exercise name conversion and the independent playback clock even before
+	# the asset arrives. This single-bone fixture exists only inside this test;
+	# it is never added to the model library or used by the actual game.
+	var fixture_player := AnimationPlayer.new()
+	fixture_player.name = "FrontKickMappingFixture"
+	fixture_player.root_node = NodePath("../RigPivot/TacticalFemale")
+	visual.add_child(fixture_player)
+	var fixture_library := AnimationLibrary.new()
+	var leg_id := _find_bone("mixamorig_RightUpLeg", "RightUpLeg")
+	var rest_rotation := skeleton.get_bone_rest(leg_id).basis.get_rotation_quaternion()
+	var kick := Animation.new()
+	kick.length = 0.6
+	var track := kick.add_track(Animation.TYPE_ROTATION_3D)
+	kick.track_set_path(track, NodePath("Armature/Skeleton3D:%s" % skeleton.get_bone_name(leg_id)))
+	kick.rotation_track_insert_key(track, 0.0, rest_rotation)
+	kick.rotation_track_insert_key(track, 0.3, rest_rotation * Quaternion(Vector3.RIGHT, 0.75))
+	kick.rotation_track_insert_key(track, kick.length, rest_rotation)
+	fixture_library.add_animation("front_kick_02", kick)
+	fixture_library.add_animation("idle", authored_player.get_animation("idle").duplicate(true))
+	fixture_library.add_animation("punch", authored_player.get_animation("punch").duplicate(true))
+	fixture_player.add_animation_library("", fixture_library)
+	visual.call("reset_pose")
+	visual.set("animation_player", fixture_player)
+	visual.call("_build_animation_aliases")
+	_check(String(visual.call("_resolve_animation_name", "front_kick")) == "front_kick_02", "front_kick resolves the exact front_kick_02 authored clip")
+	_check(String(visual.call("_resolve_animation_name", "sweep")).is_empty(), "Sweep matching cannot steal the front kick clip")
+	visual.call("apply_state", {"state": "front_kick", "time": 0.0, "action_visual_token": 901, "action_duration": 0.18})
+	_check(fixture_player.current_animation == "front_kick_02", "Explicit front_kick state selects the front_kick_02 clip")
+	var visual_duration := float(visual.get("_visual_action_duration"))
+	_check(absf(visual_duration - 0.18 / (float(visual.get("action_animation_speed_scale")) * float(visual.get("front_kick_animation_speed_multiplier")))) < 0.001, "Front kick uses a doubled animation speed beyond the 0.18 second hit window")
+	_check(is_zero_approx(float(visual.get("_visual_action_start_offset"))) and is_equal_approx(float(visual.get("_visual_action_end_offset")), kick.length), "Front kick retains the full authored clip without the punch trim")
+	for frame in range(1, 19):
+		visual.call("apply_state", {"time": float(frame) / 60.0, "action_visual_token": 901})
+	_check(fixture_player.current_animation == "front_kick_02" and bool(visual.get("_visual_action_active")), "Front kick recovery keeps playing after gameplay returns to idle")
+	_check(_pose_changed(skeleton.get_bone_rest(leg_id), _pose(leg_id)), "Front kick timeline applies the fixture leg's authored pose")
+	for frame in range(19, int(ceil(visual_duration * 60.0)) + 4):
+		visual.call("apply_state", {"time": float(frame) / 60.0, "action_visual_token": 901})
+	_check(fixture_player.current_animation == "idle", "Completed front kick returns to idle")
+	visual.call("reset_pose")
+	visual.call("apply_state", {"time": 0.0, "attack_kind": "front_kick", "slash_progress": 0.0, "action_visual_token": 902, "action_duration": 0.18})
+	_check(fixture_player.current_animation == "front_kick_02", "Player attack_kind front_kick selects the same authored animation")
+	visual.call("apply_state", {"time": 0.05, "attack_kind": "punch", "slash_progress": 0.0, "action_visual_token": 903, "action_duration": 0.12})
+	_check(fixture_player.current_animation == "punch" and String(visual.get("_visual_action_state")) == "punch", "A new card interrupts the front kick tail immediately")
+	visual.call("reset_pose")
+	visual.set("animation_player", authored_player)
+	visual.call("_build_animation_aliases")
+	fixture_player.free()
+	visual.call("reset_pose")
 
 
 func _test_roll_and_slash_chain() -> void:

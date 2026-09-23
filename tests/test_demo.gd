@@ -7,6 +7,8 @@ const SPAWN := Vector3(0.0, 0.0, 2.0)
 const ARENA_X := 10.0
 const ARENA_Z := 8.0
 const EPS := 0.08
+const STARTING_COUNTS: Dictionary = {"slash": 3, "shield": 3, "roll": 2, "dash_slash": 1, "front_kick": 1}
+const STARTING_COSTS: Dictionary = {"slash": 2.0, "shield": 2.0, "roll": 3.0, "dash_slash": 5.0, "front_kick": 2.0}
 
 var scene: Node
 var player: CharacterBody3D
@@ -114,7 +116,7 @@ func _test_costs_and_recovery() -> void:
 	_check(player.is_rolling and _near(player.roll_time_left, 0.44), "Roll starts with its 0.44-second lifetime")
 	await _steps(30)
 	_check(not player.is_rolling, "Roll completes automatically")
-	_check(_xz_distance(player.position, SPAWN) > 3.0 and _xz_distance(player.position, SPAWN) < 3.16, "Roll travels 7 units/second for 0.44 seconds")
+	_check(_xz_distance(player.position, SPAWN) > 6.0 and _xz_distance(player.position, SPAWN) < 6.3, "Roll travels 14 units/second for 0.44 seconds")
 	_check(absf(player.position.y - SPAWN.y) < 0.1, "Roll remains grounded")
 	player.reset_player()
 	player.energy = 1.5
@@ -307,7 +309,7 @@ func _test_roll_lock() -> void:
 	_check(_horizontal(player.velocity).normalized().is_equal_approx(direction), "Camera rotation cannot redirect an active roll")
 	_check(_horizontal(player.facing).is_equal_approx(direction), "Facing remains locked during a roll")
 	_release_all()
-	await _steps(12)
+	await _steps(28)
 	_check(not player.is_rolling, "Roll releases action lock when it ends")
 	_check(player.slash_time_left <= 0.0, "Concurrent slash expires without replaying after the roll")
 	if _main_process_was_enabled:
@@ -614,7 +616,7 @@ func _test_deck_distribution_and_cycle() -> void:
 	player.reset_player()
 	deck.reset_deck(31415)
 	_check(deck.total_cards == 10 and deck.hand_size == 4, "Deck exposes ten physical cards and four hand slots")
-	_check(_deck_valid(), "All card IDs are unique and the deck contains 4 slash, 3 roll and 3 dash-slash cards")
+	_check(_deck_valid(), "All card IDs are unique with 3 slash, 3 shield, 2 roll, 1 dash-punch and 1 roundhouse kick")
 	_check(_occupied_hand_count() == 4 and deck.draw_pile.size() == 6 and deck.discard_pile.is_empty(), "A new deck deals four cards and leaves six to draw")
 	var opening: Dictionary = _deck_snapshot()
 	deck.reset_deck(31415)
@@ -690,7 +692,7 @@ func _test_deck_failures_and_refill() -> void:
 	player.reset_player()
 	var available: Array = _ids(deck.draw_pile)
 	var kind: String = deck.hand[0]["kind"]
-	var expected_cost: float = {"slash": 2.0, "roll": 3.0, "dash_slash": 5.0}[kind]
+	var expected_cost: float = STARTING_COSTS[kind]
 	_check(deck.play_slot(0) and _near(player.energy, 10.0 - expected_cost), "Deck spends the selected card's actual action cost exactly once")
 	_check(deck.hand[0].is_empty() and _near(deck.refill_time_left[0], 1.0), "A successful card leaves an empty slot with a one-second refill timer")
 	player.reset_player()
@@ -744,7 +746,7 @@ func _deck_valid() -> bool:
 	if deck.hand.size() != 4 or deck.refill_time_left.size() != 4:
 		return false
 	var seen: Dictionary = {}
-	var counts := {"slash": 0, "roll": 0, "dash_slash": 0}
+	var counts := {"slash": 0, "shield": 0, "roll": 0, "dash_slash": 0, "front_kick": 0}
 	var all_cards: Array = []
 	all_cards.append_array(deck.hand)
 	all_cards.append_array(deck.draw_pile)
@@ -758,7 +760,7 @@ func _deck_valid() -> bool:
 			return false
 		seen[card["id"]] = true
 		counts[card["kind"]] += 1
-	return seen.size() == 10 and counts == {"slash": 4, "roll": 3, "dash_slash": 3}
+	return seen.size() == 10 and counts == STARTING_COUNTS
 
 func _on_reshuffled(count: int) -> void:
 	shuffle_events.append(count)
@@ -861,7 +863,7 @@ func _test_cybernetic_movement_and_cards() -> void:
 	var active_before: float = player.cybernetic_time_left
 	var cooldown_before: float = player.cybernetic_cooldown_left
 	var kind: String = deck.hand[0]["kind"]
-	var cost: float = {"slash": 2.0, "roll": 3.0, "dash_slash": 5.0}[kind]
+	var cost: float = STARTING_COSTS[kind]
 	_check(deck.play_slot(0) and _near(player.energy, 10.0 - cost), "Cards remain usable during boost and keep their normal energy cost")
 	_check(deck.hand[0].is_empty() and deck.discard_pile.size() == 1 and _deck_valid(), "Boosted card play still transfers exactly one card into discard")
 	_check(_near(player.cybernetic_time_left, active_before) and _near(player.cybernetic_cooldown_left, cooldown_before), "Playing a card neither consumes nor refreshes cybernetic timers")
@@ -891,10 +893,10 @@ func _test_cybernetic_action_speeds() -> void:
 		else:
 			_check(not player.request_card("slash"), "Boost activation does not allow another card to bypass the %s lock" % kind)
 		await _steps(4)
-		var expected_speed := 7.0 if kind == "roll" else 16.0
+		var expected_speed := 14.0 if kind == "roll" else 16.0
 		_check(_near(_horizontal(player.velocity).length(), expected_speed, 0.001), "Boost does not multiply the fixed %s speed" % kind)
 		await _steps(30 if kind == "roll" else 16)
-		var expected_distance := 3.08 if kind == "roll" else 3.84
+		var expected_distance := 6.16 if kind == "roll" else 3.84
 		_check(_near(_xz_distance(player.position, SPAWN), expected_distance, 0.06) and not player.is_action_locked() and player.is_cybernetic_active, "%s keeps its normal distance and finishes while boost remains active" % kind)
 	player.reset_player()
 	if _main_process_was_enabled:
@@ -1055,10 +1057,10 @@ func _test_turn_angle_speed() -> void:
 		_check(player.request_card(kind), "Reverse-facing %s begins normally" % kind)
 		_release_all()
 		await _steps(1)
-		var expected_speed := 7.0 if kind == "roll" else 16.0
+		var expected_speed := 14.0 if kind == "roll" else 16.0
 		_check(absf(wrapf(model_heading.rotation.y - PI, -PI, PI)) > deg_to_rad(160.0) and _near(_horizontal(player.velocity).length(), expected_speed, 0.001), "%s keeps its fixed speed even while the model is nearly opposite its travel direction" % kind)
 		await _steps(30 if kind == "roll" else 19)
-		var expected_distance := 3.08 if kind == "roll" else 3.84
+		var expected_distance := 6.16 if kind == "roll" else 3.84
 		_check(_near(_xz_distance(player.position, SPAWN), expected_distance, 0.06), "Turning does not shorten the fixed %s travel distance" % kind)
 
 	for sign_value in [-1.0, 1.0]:
@@ -1124,7 +1126,7 @@ func _test_jump_movement_independence() -> void:
 		player.request_jump()
 		# Keep this arc/boost comparison aligned; turning in air is tested separately.
 		Input.action_press("move_up")
-	await _steps(30)
+		await _steps(30)
 		heights.append(player.position.y)
 		_check(_near(_horizontal(player.velocity).length(), 9.9 if boost else 5.5, 0.01), "Air control retains the current horizontal movement speed (boost=%s)" % boost)
 	_check(_near(heights[0], heights[1], 0.001), "Cybernetic movement boost does not change the jump arc")
@@ -1136,7 +1138,7 @@ func _test_jump_movement_independence() -> void:
 
 func _test_jump_card_compatibility() -> void:
 	_release_all()
-	for kind in ["slash", "roll", "dash_slash"]:
+	for kind in ["slash", "shield", "roll", "dash_slash", "front_kick"]:
 		player.reset_player()
 		await _steps(2)
 		player.request_jump()

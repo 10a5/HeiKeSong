@@ -24,10 +24,10 @@ extends Node3D
 ## local delta, and rest position/scale are kept on every frame so a reset can
 ## never collapse the skinned mesh.
 
-const CHARACTER_SCENE: PackedScene = preload("res://main Character/futuristic+armored+female+3d+model (5).glb")
+const CHARACTER_SCENE: PackedScene = preload("res://main Character/futuristic+armored+female+3d+model (8).glb")
 const ACTION_ANIMATION_STATES: Array[String] = [
 	"punch", "slash", "roll", "dash_slash",
-	"sweep", "shot", "charged_slash", "airborne_slash", "dive_slash",
+	"sweep", "front_kick", "shot", "charged_slash", "airborne_slash", "dive_slash",
 ]
 
 ## World-space height of the imported character.  The first-floor buildings
@@ -61,6 +61,9 @@ const ACTION_ANIMATION_STATES: Array[String] = [
 @export_range(0.05, 1.5, 0.05) var punch_animation_segment_duration: float = 0.5
 ## Roll movement and the authored forward-roll clip share the gameplay timeline.
 @export_range(0.1, 2.0, 0.05) var roll_animation_speed_scale: float = 1.0
+## The authored roundhouse clip plays twice as fast while its gameplay lock
+## remains independent from the short damage window.
+@export_range(1.0, 4.0, 0.1) var front_kick_animation_speed_multiplier: float = 2.0
 ## The imported jump clip begins with a short run-up. Start playback at this
 ## offset so the visible action begins at takeoff while player physics stays
 ## unchanged. The value is clamped for shorter fallback clips.
@@ -161,6 +164,7 @@ func _create_animation_player() -> void:
 				_lock_idle_lower_body(clip)
 		_build_animation_aliases()
 		_create_generated_sweep_animation()
+		_create_generated_front_kick_animation()
 		_animation_available = true
 		return
 
@@ -176,6 +180,7 @@ func _create_animation_player() -> void:
 		return
 	animation_player.add_animation_library("", _animation_library)
 	_build_animation_aliases()
+	_create_generated_front_kick_animation()
 	_animation_available = true
 
 
@@ -234,7 +239,7 @@ func _lock_idle_lower_body(animation: Animation) -> void:
 
 func _build_animation_aliases() -> void:
 	_animation_aliases.clear()
-	for logical_name in ["idle", "run", "punch", "roll", "jump", "sweep"]:
+	for logical_name in ["idle", "run", "punch", "roll", "jump", "sweep", "front_kick"]:
 		var direct := ""
 		if is_instance_valid(animation_player) and animation_player.has_animation(logical_name):
 			direct = logical_name
@@ -244,7 +249,10 @@ func _build_animation_aliases() -> void:
 				"punch": tokens = ["punch", "拳"]
 				"roll": tokens = ["roll", "翻滚", "翻"]
 				"jump": tokens = ["jump", "leap", "跳"]
-				"sweep": tokens = ["sweep", "kick", "扫腿", "踢"]
+				# A front kick is a separate authored action. Do not let the sweep
+				# alias claim it just because both names contain "kick".
+				"sweep": tokens = ["sweep", "扫腿"]
+				"front_kick": tokens = ["front_kick_02", "front kick 02", "front-kick-02", "frontkick02"]
 				_: tokens = [logical_name]
 			direct = _find_animation_by_tokens(tokens)
 		if not direct.is_empty():
@@ -297,6 +305,43 @@ func _create_generated_sweep_animation() -> void:
 	_animation_aliases["sweep"] = "sweep_generated"
 
 
+func _create_generated_front_kick_animation() -> void:
+	# Keep compatibility with older character deliveries that lack front_kick_02.
+	# The authored clip with that exact name always wins when it is present.
+	if not is_instance_valid(animation_player) or _animation_aliases.has("front_kick") or animation_player.has_animation("front_kick_02"):
+		if is_instance_valid(animation_player) and animation_player.has_animation("front_kick_02"):
+			_animation_aliases["front_kick"] = "front_kick_02"
+		return
+	var library := animation_player.get_animation_library("")
+	if library == null:
+		library = AnimationLibrary.new()
+		animation_player.add_animation_library("", library)
+	var animation := Animation.new()
+	animation.length = 0.42
+	animation.loop_mode = Animation.LOOP_NONE
+	var tracks: Dictionary = {}
+	for bone_name in ["mixamorig_Hips", "mixamorig_RightUpLeg", "mixamorig_RightLeg", "mixamorig_RightFoot", "mixamorig_LeftUpLeg", "mixamorig_Spine", "mixamorig_Spine1", "mixamorig_LeftArm", "mixamorig_RightArm"]:
+		if not _bone_ids.has(bone_name):
+			continue
+		var track_index := animation.add_track(Animation.TYPE_ROTATION_3D)
+		animation.track_set_path(track_index, NodePath("Armature/Skeleton3D:%s" % bone_name))
+		tracks[bone_name] = track_index
+	var poses: Array[Dictionary] = [
+		{"time": 0.0, "hips": Vector3.ZERO, "right_up": Vector3.ZERO, "right_leg": Vector3.ZERO, "right_foot": Vector3.ZERO, "left_up": Vector3.ZERO, "spine": Vector3.ZERO, "spine1": Vector3.ZERO, "left_arm": Vector3.ZERO, "right_arm": Vector3.ZERO},
+		{"time": 0.10, "hips": Vector3(0.0, 0.0, -0.12), "right_up": Vector3(-0.48, 0.0, 0.08), "right_leg": Vector3(0.72, 0.0, 0.0), "right_foot": Vector3(-0.18, 0.0, 0.0), "left_up": Vector3(0.12, 0.0, -0.05), "spine": Vector3(0.0, 0.0, -0.08), "spine1": Vector3(0.0, 0.0, -0.06), "left_arm": Vector3(0.0, 0.0, 0.18), "right_arm": Vector3(0.0, 0.0, -0.18)},
+		{"time": 0.19, "hips": Vector3(0.0, 0.0, 0.04), "right_up": Vector3(-1.02, 0.0, 0.10), "right_leg": Vector3(1.30, 0.0, 0.0), "right_foot": Vector3(-0.38, 0.0, 0.0), "left_up": Vector3(0.16, 0.0, -0.06), "spine": Vector3(0.0, 0.0, 0.16), "spine1": Vector3(0.0, 0.0, 0.11), "left_arm": Vector3(0.0, 0.0, -0.16), "right_arm": Vector3(0.0, 0.0, 0.18)},
+		{"time": 0.42, "hips": Vector3.ZERO, "right_up": Vector3.ZERO, "right_leg": Vector3.ZERO, "right_foot": Vector3.ZERO, "left_up": Vector3.ZERO, "spine": Vector3.ZERO, "spine1": Vector3.ZERO, "left_arm": Vector3.ZERO, "right_arm": Vector3.ZERO},
+	]
+	var keys_for: Dictionary = {"mixamorig_Hips": "hips", "mixamorig_RightUpLeg": "right_up", "mixamorig_RightLeg": "right_leg", "mixamorig_RightFoot": "right_foot", "mixamorig_LeftUpLeg": "left_up", "mixamorig_Spine": "spine", "mixamorig_Spine1": "spine1", "mixamorig_LeftArm": "left_arm", "mixamorig_RightArm": "right_arm"}
+	for bone_name in tracks:
+		var bone_index := int(_bone_ids[bone_name])
+		var track_index := int(tracks[bone_name])
+		for pose: Dictionary in poses:
+			animation.track_insert_key(track_index, float(pose["time"]), _rest_rotations[bone_index] * Quaternion.from_euler(pose[keys_for[bone_name]]))
+	library.add_animation("front_kick_02", animation)
+	_animation_aliases["front_kick"] = "front_kick_02"
+
+
 func _has_animation(animation_name: String) -> bool:
 	return not _resolve_animation_name(animation_name).is_empty()
 
@@ -319,6 +364,9 @@ func _resolve_animation_name(logical_name: String) -> String:
 		return String(_animation_aliases[logical_name])
 	if logical_name == "walk" and _animation_aliases.has("run"):
 		return String(_animation_aliases["run"])
+	# front_kick deliberately has no unrelated replacement clip. If an imported
+	# model lacks the authored action, the setup step creates a dedicated fallback
+	# clip instead of presenting a punch or sweep as the requested animation.
 	# Legacy attack cards share the authored punch clip until dedicated clips
 	# are added to the model.
 	if logical_name in ["slash", "dash_slash", "shot", "charged_slash", "airborne_slash", "dive_slash"] and _animation_aliases.has("punch"):
@@ -699,6 +747,8 @@ func _begin_visual_action(resolved_name: String, logical_state: String, token: i
 		_visual_action_duration = maxf(minf(punch_animation_segment_duration, _visual_action_end_offset - _visual_action_start_offset), 0.01)
 	elif logical_state == "roll":
 		_visual_action_duration = maxf(gameplay_duration / maxf(roll_animation_speed_scale, 0.001), 0.01)
+	elif logical_state == "front_kick":
+		_visual_action_duration = maxf(gameplay_duration / maxf(action_animation_speed_scale * front_kick_animation_speed_multiplier, 0.001), 0.01)
 	else:
 		_visual_action_duration = maxf(gameplay_duration / maxf(action_animation_speed_scale, 0.001), 0.01)
 	_visual_action_active = true
@@ -776,10 +826,10 @@ func _animation_name_for_state(state_name: String, state: Dictionary, attack_kin
 		return "dash_slash"
 	if state_name == "charged_slash" or charge_amount > 0.0:
 		return "charged_slash"
-	if state_name in ["slash", "punch", "sweep", "shot", "airborne_slash", "dive_slash"]:
+	if state_name in ["slash", "punch", "sweep", "front_kick", "shot", "airborne_slash", "dive_slash"]:
 		return state_name
 	if slash_progress >= 0.0:
-		if attack_kind in ["punch", "sweep", "shot", "charged_slash", "airborne_slash", "dive_slash"]:
+		if attack_kind in ["punch", "sweep", "front_kick", "shot", "charged_slash", "airborne_slash", "dive_slash"]:
 			return attack_kind
 		return "slash"
 	if roll_progress >= 0.0 or state_name == "roll":

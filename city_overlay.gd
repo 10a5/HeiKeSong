@@ -82,7 +82,7 @@ func _draw() -> void:
 	if encounters is Array and not encounters.is_empty():
 		total = encounters.size()
 	if not map_open:
-		_text(Vector2(20, 122), "信用 %d  ·  遭遇 %d/%d" % [credits, cleared, total], 11, TEXT)
+		_text(Vector2(20, 152), "信用 %d  ·  遭遇 %d/%d" % [credits, cleared, total], 11, TEXT)
 		var zone := str(_controller.get("water_zone"))
 		var water_hint := "水边谨慎 · M 查看地图"
 		var accent := MUTED
@@ -92,7 +92,7 @@ func _draw() -> void:
 		elif zone in ["deep", "深水", "deep_water"] or bool(_controller.get("lost_in_water")):
 			water_hint = "深水区 · 返回岸边"
 			accent = DANGER
-		_text(Vector2(20, 140), water_hint, 10, accent)
+		_text(Vector2(20, 170), water_hint, 10, accent)
 		draw_rect(MINI.grow(2), Color("0c1b28"))
 		_draw_city(MINI, false)
 		draw_rect(MINI.grow(2), Color("3e6071"), false, 1.0)

@@ -8,13 +8,14 @@ signal action_attempted(action_name: String, accepted: bool, reason: String)
 signal status_changed(message: String, is_error: bool)
 signal cybernetic_changed(active_time_left: float, cooldown_left: float)
 signal health_changed(current: float, maximum: float)
+signal shield_changed(current: float)
 signal damaged(amount: float)
 signal defeated()
 
 const COMBAT = preload("res://combat_hit.gd")
 const CARD_CATALOG = preload("res://card_catalog.gd")
 const CHARACTER_VISUAL = preload("res://character_visual.gd")
-const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "shot"]
+const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "front_kick", "shot"]
 
 @export var move_speed: float = 5.5
 @export_range(60.0, 720.0, 15.0) var turn_speed_degrees: float = 360.0
@@ -23,8 +24,8 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "shot"]
 @export var gravity: float = 24.0
 @export var max_fall_speed: float = 30.0
 @export_range(0.0, 0.5, 0.01) var max_step_height: float = 0.30
-## The roll keeps its original travel distance while moving at half speed.
-@export var roll_speed: float = 7.0
+## The roll keeps its authored duration while covering twice the previous distance.
+@export var roll_speed: float = 14.0
 @export var roll_duration: float = 0.44
 @export var dash_speed: float = 16.0
 @export var dash_duration: float = 0.24
@@ -40,6 +41,7 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "shot"]
 @export var radius: float = 0.35
 @export_group("Combat")
 @export var max_health: float = 100.0
+@export_range(0.05, 10.0, 0.05) var shield_decay_interval: float = 0.5
 @export var slash_damage: float = 25.0
 @export var dash_slash_damage: float = 45.0
 @export var slash_reach: float = 2.1
@@ -54,6 +56,12 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "shot"]
 @export var sweep_damage: float = 22.0
 @export var sweep_reach: float = 1.65
 @export var sweep_visual_duration: float = 0.18
+@export var front_kick_damage: float = 50.0
+@export var front_kick_radius: float = 2.0
+@export var front_kick_hit_duration: float = 0.18
+## The kick remains locked for its complete accelerated visual action.
+@export_range(0.1, 2.0, 0.05) var front_kick_action_duration: float = 0.9
+@export var shield_per_card: float = 10.0
 @export var shot_damage: float = 18.0
 @export var shot_range: float = 10.0
 @export var charged_slash_damage: float = 45.0
@@ -81,6 +89,8 @@ var gravity_scale: float = 1.0
 var vertical_acceleration: float = 0.0
 var energy: float = 10.0
 var health: float = 100.0
+var shield: float = 0.0
+var _shield_decay_elapsed: float = 0.0
 var is_dead: bool = false
 var _damage_flash_left: float = 0.0
 var _slash_targets_hit: Array[int] = []
@@ -113,6 +123,7 @@ var is_dashing: bool = false
 var dash_direction: Vector3 = Vector3.FORWARD
 var dash_time_left: float = 0.0
 var slash_time_left: float = 0.0
+var front_kick_lock_time_left: float = 0.0
 var slash_direction: Vector3 = Vector3.FORWARD
 var _dash_slash_started: bool = false
 var _slash_is_dash: bool = false
@@ -155,6 +166,8 @@ func reset_player() -> void:
 	_action_visual_token += 1
 	energy = max_energy
 	health = max_health
+	shield = 0.0
+	_shield_decay_elapsed = 0.0
 	is_dead = false
 	_damage_flash_left = 0.0
 	_slash_targets_hit.clear()
@@ -178,6 +191,7 @@ func reset_player() -> void:
 	roll_time_left = 0.0
 	dash_time_left = 0.0
 	slash_time_left = 0.0
+	front_kick_lock_time_left = 0.0
 	cybernetic_time_left = 0.0
 	cybernetic_cooldown_left = 0.0
 	_cybernetic_trail_clock = 0.0
@@ -196,6 +210,7 @@ func reset_player() -> void:
 	_update_model(Vector3.ZERO)
 	energy_changed.emit(energy, max_energy)
 	health_changed.emit(health, max_health)
+	shield_changed.emit(shield)
 	cybernetic_changed.emit(cybernetic_time_left, cybernetic_cooldown_left)
 	status_changed.emit("准备就绪 · 选择一张动作牌", false)
 
@@ -212,6 +227,7 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		_update_model(Vector3.ZERO)
 		return
+	_update_shield_decay(delta)
 	var previous_energy := energy
 	energy = minf(max_energy, energy + energy_regen_per_second * delta)
 	if not is_equal_approx(energy, previous_energy):
@@ -239,6 +255,14 @@ func _physics_process(delta: float) -> void:
 	elif is_dashing:
 		_step_support_active = false
 		_advance_dash(delta)
+	elif _is_front_kick_active():
+		# The roundhouse owns the complete horizontal movement window. Gravity and
+		# floor collision still run, but input cannot slide the player during it.
+		_step_support_active = false
+		velocity.x = 0.0
+		velocity.z = 0.0
+		move_and_slide()
+		_clamp_to_arena()
 	elif air_move_time_left > 0.0:
 		_step_support_active = false
 		air_move_time_left = maxf(0.0, air_move_time_left - delta)
@@ -434,6 +458,18 @@ func request_card(kind: String) -> bool:
 		action_attempted.emit(kind, false, "no_energy")
 		status_changed.emit("能量不足", true)
 		return false
+	if kind == "shield":
+		# An instant defensive card can protect a combo without cancelling its
+		# movement, hit window or animation. Repeated cards add to the same pool.
+		if not add_shield(shield_per_card):
+			return false
+		energy -= cost
+		energy_changed.emit(energy, max_energy)
+		_spawn_ring(Color("74dfff"), 0.7, 0.24)
+		action_played.emit(kind, cost)
+		action_attempted.emit(kind, true, "accepted")
+		status_changed.emit("护盾 +%.0f" % shield_per_card, false)
+		return true
 	# Resolve direction at the actual input event, including HUD card clicks.
 	var input_direction := _get_input_direction()
 	var direction := input_direction.normalized() if input_direction != Vector3.ZERO else facing
@@ -465,6 +501,12 @@ func request_card(kind: String) -> bool:
 			_start_melee(direction, kind, slash_damage, slash_reach, slash_visual_duration if not chained else combo_slash_duration, deg_to_rad(48.0), melee_vertical_reach)
 		"sweep":
 			_start_melee(direction, kind, sweep_damage, sweep_reach, sweep_visual_duration, deg_to_rad(100.0), 0.65)
+		"front_kick":
+			# A full-circle area hit uses the same one-hit-per-target, height and
+			# wall checks as the existing melee system.
+			_start_melee(direction, kind, front_kick_damage, front_kick_radius, front_kick_hit_duration, PI, melee_vertical_reach)
+			front_kick_lock_time_left = maxf(front_kick_action_duration, front_kick_hit_duration)
+			_spawn_ring(Color("ffd087"), front_kick_radius, front_kick_hit_duration)
 		"shot":
 			_fire_shot(direction)
 		"charged_slash":
@@ -518,12 +560,20 @@ func request_card(kind: String) -> bool:
 
 
 func is_action_locked() -> bool:
-	return is_rolling or is_dashing or is_diving
+	return is_rolling or is_dashing or is_diving or _is_front_kick_active()
+
+
+func _is_front_kick_active() -> bool:
+	return front_kick_lock_time_left > 0.0
 
 
 func can_chain_card(kind: String) -> bool:
 	if is_dead or get_tree().paused or not CARD_CATALOG.has_kind(kind):
 		return false
+	if _is_front_kick_active():
+		return false
+	if kind == "shield":
+		return true
 	if kind == "jet_jump" and jet_jump_used:
 		return false
 	if kind == "airborne_slash" and airborne_slash_used:
@@ -561,6 +611,8 @@ func _start_melee(direction: Vector3, kind: String, damage: float, reach: float,
 		color = Color("fff6b0")
 	elif kind == "sweep":
 		color = Color("8ff0ff")
+	elif kind == "front_kick":
+		color = Color("ffd087")
 	elif kind == "airborne_slash":
 		color = Color("6ceaff")
 	elif kind == "dash_slash":
@@ -682,6 +734,7 @@ func _spawn_ring(color: Color, effect_radius: float, duration: float) -> void:
 
 func _clear_extra_actions() -> void:
 	charge_time_left = 0.0
+	front_kick_lock_time_left = 0.0
 	is_diving = false
 	dive_startup_left = 0.0
 	jet_jump_used = false
@@ -696,13 +749,49 @@ func _clear_extra_actions() -> void:
 	_action_effects.clear()
 
 
+func add_shield(amount: float) -> bool:
+	if is_dead or get_tree().paused or amount <= 0.0:
+		return false
+	if shield <= 0.0:
+		_shield_decay_elapsed = 0.0
+	shield += amount
+	shield_changed.emit(shield)
+	return true
+
+
+func _update_shield_decay(delta: float) -> void:
+	if shield <= 0.0:
+		_shield_decay_elapsed = 0.0
+		return
+	# Keep fractional time between frames and additions. A long frame must
+	# consume every elapsed half-second instead of slowing down the decay.
+	_shield_decay_elapsed += maxf(0.0, delta)
+	var interval := maxf(0.05, shield_decay_interval)
+	var ticks := floori((_shield_decay_elapsed + 0.000001) / interval)
+	if ticks <= 0:
+		return
+	_shield_decay_elapsed = maxf(0.0, _shield_decay_elapsed - ticks * interval)
+	shield = maxf(0.0, shield - float(ticks))
+	if shield <= 0.0:
+		_shield_decay_elapsed = 0.0
+	shield_changed.emit(shield)
+
+
 func take_damage(amount: float) -> bool:
 	# A roll has a short, explicit evasion window; walking and dash-slash do not.
 	if is_dead or get_tree().paused or is_rolling or amount <= 0.0:
 		return false
-	var applied := minf(amount, health)
+	var absorbed := minf(amount, shield)
+	if absorbed > 0.0:
+		shield = maxf(0.0, shield - absorbed)
+		if shield <= 0.0:
+			_shield_decay_elapsed = 0.0
+		shield_changed.emit(shield)
+	var applied := minf(amount - absorbed, health)
 	health = maxf(0.0, health - applied)
-	_damage_flash_left = 0.2
+	# A fully absorbed hit should not flash the red health feedback; the shield
+	# bar and status message already communicate that impact.
+	_damage_flash_left = 0.2 if applied > 0.0 else 0.0
 	if health <= 0.0:
 		is_dead = true
 		_clear_extra_actions()
@@ -717,13 +806,16 @@ func take_damage(amount: float) -> bool:
 		velocity.x = 0.0
 		velocity.z = 0.0
 		cybernetic_changed.emit(cybernetic_time_left, cybernetic_cooldown_left)
-	health_changed.emit(health, max_health)
-	damaged.emit(applied)
+	if applied > 0.0:
+		health_changed.emit(health, max_health)
+		damaged.emit(applied)
 	if is_dead:
 		status_changed.emit("训练失败 · 按 R 重试", true)
 		defeated.emit()
-	else:
+	elif applied > 0.0:
 		status_changed.emit("受到劈砍 −%.0f 生命 · 落刀前翻滚" % applied, true)
+	else:
+		status_changed.emit("护盾吸收 %.0f 伤害" % absorbed, false)
 	_update_model(Vector3.ZERO)
 	return true
 
@@ -733,15 +825,16 @@ func become_lost() -> void:
 	if is_dead or get_tree().paused:
 		return
 	is_rolling = false
-	take_damage(max_health)
+	# Deep-water loss remains lethal even while a temporary shield is active.
+	take_damage(health + shield)
 	velocity = Vector3.ZERO
 	set_physics_process(false)
 	status_changed.emit("沉入深水 · 意识迷失", true)
 
 
 func _advance_roll(delta: float) -> void:
-	# The speed and duration are paired so a complete roll still travels about
-	# 3.08 m while taking twice as long to make the forward rotation readable.
+	# Keep the authored roll timeline unchanged while doubling its physical travel
+	# from about 3.08 m to about 6.16 m.
 	var step := minf(delta, roll_time_left)
 	var frame_speed := roll_speed * (step / delta if delta > 0.0 else 0.0)
 	velocity.x = roll_direction.x * frame_speed
@@ -802,6 +895,7 @@ func _clamp_to_arena() -> void:
 
 func _update_visual_timers(delta: float) -> void:
 	slash_time_left = maxf(0.0, slash_time_left - delta)
+	front_kick_lock_time_left = maxf(0.0, front_kick_lock_time_left - delta)
 	for index in range(_action_effects.size() - 1, -1, -1):
 		_action_effects[index]["life"] = float(_action_effects[index]["life"]) - delta
 		var effect: Dictionary = _action_effects[index]

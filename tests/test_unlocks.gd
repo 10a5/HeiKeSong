@@ -25,7 +25,7 @@ func _run() -> void:
 	_check(InputMap.has_action("interact"), "E interaction is mapped")
 	_check(deck.total_cards == 10 and deck.get_card_snapshot().size() == 10, "Fresh game retains ten starter cards")
 	_check(deck.hand.size() == 4, "Unlocking does not enlarge cognitive hand capacity")
-	for kind in ["slash", "roll", "dash_slash"]:
+	for kind in ["slash", "shield", "roll", "dash_slash", "front_kick"]:
 		_check(deck.is_kind_unlocked(kind), "Starter action %s is already known" % kind)
 	for kind in NEW_KINDS:
 		_check(not deck.is_kind_unlocked(kind), "%s starts locked" % kind)
@@ -34,7 +34,7 @@ func _run() -> void:
 	var unlocked_count := 0
 	for entry in catalog_browser.displayed_cards:
 		unlocked_count += int(entry.get("unlocked", false))
-	_check(catalog_browser.displayed_cards.size() == 11 and unlocked_count == 3, "Discovery browser shows eleven actions with only three restored")
+	_check(catalog_browser.displayed_cards.size() == 13 and unlocked_count == 5, "Discovery browser shows thirteen actions with five restored")
 	_check(deck.get_card_snapshot().size() == 10, "Locked catalog entries never create physical cards")
 	scene.close_card_browser()
 	var original: Array = deck.get_card_snapshot()
@@ -80,12 +80,12 @@ func _run() -> void:
 			_check(deck.is_kind_unlocked(kind) and _kind_count(kind) == 1, "Recovered %s has exactly one physical card" % kind)
 		_check(not scene.try_interact(), "A restored terminal cannot duplicate rewards")
 		_check(_deck_valid(total), "Card identity and zone conservation survive restoration")
-	_check(deck.total_cards == 18, "All eleven actions produce eighteen physical cards")
+	_check(deck.total_cards == 18, "All thirteen actions produce eighteen physical cards")
 	scene.open_card_browser(&"catalog")
 	var all_restored := true
 	for entry in catalog_browser.displayed_cards:
 		all_restored = all_restored and bool(entry.get("unlocked", false))
-	_check(all_restored and catalog_browser.displayed_cards.size() == 11, "Discovery browser updates every unlock state")
+	_check(all_restored and catalog_browser.displayed_cards.size() == 13, "Discovery browser updates every unlock state")
 	scene.close_card_browser()
 	scene.open_card_browser(&"all")
 	var browser: Control = scene.get("hud").card_browser
@@ -103,7 +103,7 @@ func _run() -> void:
 	fresh.set_script(load("res://deck.gd"))
 	root.add_child(fresh)
 	fresh.setup(player, 44)
-	_check(fresh.total_cards == 10 and not fresh.is_kind_unlocked("punch") and not fresh.is_kind_unlocked("sweep"), "Unlock scope is this session; a fresh deck starts with basic memories")
+	_check(fresh.total_cards == 10 and fresh.is_kind_unlocked("shield") and fresh.is_kind_unlocked("front_kick") and not fresh.is_kind_unlocked("punch") and not fresh.is_kind_unlocked("sweep"), "A fresh deck keeps its five starter memories while optional unlocks remain session-scoped")
 	fresh.queue_free()
 	print("UNLOCK RESULT: %d passed, %d failed" % [passed, failed])
 	quit(0 if failed == 0 else 1)

@@ -11,9 +11,10 @@ signal card_unlocked(kind: String)
 const CATALOG = preload("res://card_catalog.gd")
 
 const STARTING_KINDS: Array[String] = [
-	"slash", "slash", "slash", "slash",
-	"roll", "roll", "roll",
-	"dash_slash", "dash_slash", "dash_slash"
+	"slash", "slash", "slash",
+	"shield", "shield", "shield",
+	"roll", "roll",
+	"dash_slash", "front_kick"
 ]
 
 @export var refill_delay: float = 1.0

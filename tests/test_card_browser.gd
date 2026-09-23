@@ -57,7 +57,7 @@ func _test_snapshots() -> void:
 	var draw: Array = deck.get_card_snapshot(&"draw")
 	var discard: Array = deck.get_card_snapshot(&"discard")
 	_check(all.size() == 10 and _unique_ids(all).size() == 10, "The complete deck includes ten distinct physical cards")
-	_check(_kind_count(all, "slash") == 4 and _kind_count(all, "roll") == 3 and _kind_count(all, "dash_slash") == 3, "Repeated action kinds retain all four/three/three card copies")
+	_check(_kind_count(all, "slash") == 3 and _kind_count(all, "shield") == 3 and _kind_count(all, "roll") == 2 and _kind_count(all, "dash_slash") == 1 and _kind_count(all, "front_kick") == 1, "Starter copies remain 3 slash, 3 shield, 2 roll, 1 dash-punch and 1 roundhouse kick")
 	_check(draw.size() == 6 and _ids(draw) == _ids(deck.draw_pile), "Draw snapshot contains exactly the six undrawn cards")
 	_check(discard.is_empty(), "An initially empty discard pile has no invented cards")
 	_check(_zone_count(all, &"draw") == 6 and _zone_count(all, &"hand") == 4 and _zone_count(all, &"discard") == 0, "The complete snapshot reports each card's actual zone")

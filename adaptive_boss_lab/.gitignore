@@ -1,0 +1,5 @@
+.godot/
+.DS_Store
+llm_config.local.json
+exports/
+*.log

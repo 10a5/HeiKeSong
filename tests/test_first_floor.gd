@@ -340,9 +340,16 @@ func _test_services() -> void:
 	var factory := _service("factory")
 	var residential := _service("residential")
 	_check(shop != null and medical != null and police != null and factory != null and residential != null, "Every building interaction type is present in the actual scene")
+	var shop_upper: Node = city_map._generated.get_node("Building_%02d_shop/OccludableUpper" % int(shop.data["id"]))
+	var factory_upper: Node = city_map._generated.get_node("Building_%02d_factory/OccludableUpper" % int(factory.data["id"]))
+	var old_overlay_names := ["FunctionBand", "BuildingFunction", "ShopAwning", "OfficeSkylight", "DoorPath"]
+	var overlays_removed := shop.get_child_count() == 0 and factory.get_child_count() == 0
+	for old_name in old_overlay_names:
+		overlays_removed = overlays_removed and shop_upper.find_child(old_name, true, false) == null and factory_upper.find_child(old_name, true, false) == null
+	_check(overlays_removed, "Imported shop and factory keep their model surfaces without generated labels, stripes or service markers")
 	_check(floor_scene.credits == 40 and not floor_scene.try_interact(), "The run begins with 40 credit and cannot activate remote buildings")
 	await _park(shop.global_position)
-	_check(shop.can_interact(), "The shop service marker is reachable from its street")
+	_check(shop.can_interact(), "The shop model edge is reachable from its street")
 	var total_before: int = deck.total_cards
 	var hand_before: Array = deck.hand.duplicate(true)
 	floor_scene.toggle_pause()
