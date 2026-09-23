@@ -29,6 +29,10 @@ var is_dead: bool = false
 var combat_enabled: bool = true
 var state: StringName = &"idle"
 var state_time_left: float = 0.0
+## Filled by AdaptiveBossBrain as an explainable intent hook. The training foe
+## does not change its deterministic moves yet; Mirror can consume this later.
+var adaptive_reaction: StringName = &"observe"
+var adaptive_reaction_payload: Dictionary = {}
 var attack_direction: Vector3 = Vector3.BACK
 var _actor: CharacterBody3D
 var _hit_this_swing: bool = false
@@ -72,6 +76,8 @@ func reset_enemy() -> void:
 	collision_mask = 1
 	state = &"idle"
 	state_time_left = 0.0
+	adaptive_reaction = &"observe"
+	adaptive_reaction_payload.clear()
 	attack_direction = Vector3.BACK
 	_hit_this_swing = false
 	_hurt_time_left = 0.0
@@ -101,6 +107,12 @@ func take_damage(amount: float) -> bool:
 	if is_dead:
 		defeated.emit()
 	return true
+
+
+func apply_adaptive_reaction(reaction: StringName, payload: Dictionary = {}) -> void:
+	"""Receive a bounded brain intent without changing the training baseline."""
+	adaptive_reaction = reaction
+	adaptive_reaction_payload = payload.duplicate(true)
 
 
 func _physics_process(delta: float) -> void:

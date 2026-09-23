@@ -1,0 +1,13 @@
+{
+  "name": "翻滚后劈砍（目标习惯）",
+  "description": "玩家连续翻滚接劈砍；最后一次翻滚应触发 Boss 的 evade 反应。",
+  "events": [
+    {"type":"action", "kind":"roll", "cost":3, "energy":10, "is_rolling":true, "distance":2.8},
+    {"type":"action", "kind":"slash", "cost":2, "energy":7, "is_rolling":false, "distance":2.1},
+    {"type":"action", "kind":"roll", "cost":3, "energy":10, "is_rolling":true, "distance":2.7},
+    {"type":"action", "kind":"slash", "cost":2, "energy":7, "is_rolling":false, "distance":2.0},
+    {"type":"action", "kind":"roll", "cost":3, "energy":10, "is_rolling":true, "distance":2.6},
+    {"type":"action", "kind":"slash", "cost":2, "energy":7, "is_rolling":false, "distance":2.0},
+    {"type":"action", "kind":"roll", "cost":3, "energy":10, "is_rolling":true, "distance":2.4}
+  ]
+}

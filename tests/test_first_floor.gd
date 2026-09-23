@@ -3,7 +3,8 @@ extends SceneTree
 ## Godot --headless --path . --fixed-fps 60 --script tests/test_first_floor.gd
 
 const TEST_SEED := 7331
-const STREETS: Array[float] = [-60.0, -36.0, -12.0, 12.0, 36.0, 60.0]
+const STREETS_X: Array[float] = [-55.0, -33.0, -11.0, 11.0, 33.0, 55.0]
+const STREETS_Z: Array[float] = [-36.0, -18.0, 0.0, 18.0, 36.0]
 const ACTIONS: Array[String] = ["move_left", "move_right", "move_up", "move_down", "hand_1", "hand_2", "hand_3", "hand_4", "jump", "cybernetic_boost", "interact"]
 const CATALOG = preload("res://card_catalog.gd")
 
@@ -29,7 +30,9 @@ func _run() -> void:
 	floor_scene.set_process(false)
 	await _new_floor(TEST_SEED)
 	_check(str(ProjectSettings.get_setting("application/run/main_scene")) == "res://floor_one.tscn", "The first floor is the default playable scene")
-	_check(not player.bounds_enabled and _near(player.global_position.x, -12.0) and _near(player.global_position.z, 60.0), "Player spawns in the south street with greybox bounds disabled")
+	var adaptive_brain: Node = floor_scene.get("boss_brain") as Node
+	_check(adaptive_brain != null and adaptive_brain.get("player") == player, "First floor attaches the adaptive brain despite overriding main ready")
+	_check(not player.bounds_enabled and _near(player.global_position.x, -11.0) and _near(player.global_position.z, 36.0), "Player spawns in the south street with greybox bounds disabled")
 	await _test_seeded_layout()
 	await _test_city_geometry()
 	await _test_occlusion_transparency()
@@ -47,18 +50,18 @@ func _run() -> void:
 
 func _test_seeded_layout() -> void:
 	var first_layout := _layout_snapshot()
-	var first_events := _office_events()
+	var first_events := _factory_events()
 	await _new_floor(TEST_SEED)
 	_check(first_layout == _layout_snapshot(), "A fixed seed reproduces building types, dimensions and encounter locations")
-	_check(first_events == _office_events(), "Office events are deterministic for the same map seed")
+	_check(first_events == _factory_events(), "Factory events are deterministic for the same map seed")
 	await _new_floor(TEST_SEED + 1)
 	_check(first_layout != _layout_snapshot(), "A different seed produces a different district layout")
 	await _new_floor(TEST_SEED)
 	var buildings: Array = city_map.building_data
-	_check(buildings.size() == 25 and floor_scene.services.size() == 25, "A 5 by 5 district contains exactly 25 building cells and service records")
+	_check(buildings.size() == 20 and floor_scene.services.size() == 20, "A 5 by 4 rectangular district contains exactly 20 building cells and service records")
 	var ids: Dictionary = {}
 	var cells: Dictionary = {}
-	var counts := {"residential": 0, "shop": 0, "office": 0, "medical": 0, "police": 0}
+	var counts := {"residential": 0, "shop": 0, "factory": 0, "medical": 0, "police": 0}
 	var valid_grid := true
 	var valid_sizes := true
 	var valid_doors := true
@@ -66,25 +69,25 @@ func _test_seeded_layout() -> void:
 		var cell: Vector2i = data["cell"]
 		var at: Vector3 = data["position"]
 		var door: Vector3 = data["door_position"]
-		valid_grid = valid_grid and cell.x in range(5) and cell.y in range(5) and not ids.has(data["id"]) and not cells.has(cell)
-		valid_grid = valid_grid and _near(at.x, -48.0 + cell.x * 24.0) and _near(at.z, -48.0 + cell.y * 24.0)
+		valid_grid = valid_grid and cell.x in range(5) and cell.y in range(4) and not ids.has(data["id"]) and not cells.has(cell)
+		valid_grid = valid_grid and _near(at.x, -44.0 + cell.x * 22.0) and _near(at.z, -27.0 + cell.y * 18.0)
 		var height: float = data["height"]
-		var valid_height := height > 15.0 and height < 15.5 if data["kind"] == "residential" else height >= 6.0 and height <= 8.0
-		valid_sizes = valid_sizes and _near(float(data["width"]), 16.0) and valid_height
-		valid_doors = valid_doors and _near(door.x, at.x) and door.z > at.z + 8.0 and door.z < at.z + 12.0
+		var valid_height := height > 15.0 and height < 15.5 if data["kind"] == "residential" else height >= 7.0 and height <= 10.0
+		valid_sizes = valid_sizes and _near(float(data["width"]), 14.0) and _near(float(data["depth"]), 10.0) and valid_height
+		valid_doors = valid_doors and _near(door.x, at.x) and door.z > at.z + 5.0 and door.z < at.z + 8.0
 		ids[data["id"]] = true
 		cells[cell] = true
 		if counts.has(data["kind"]):
 			counts[data["kind"]] += 1
 		else:
 			valid_grid = false
-	_check(valid_grid and ids.size() == 25 and cells.size() == 25, "Every grid cell has one unique building ID at the 24-metre pitch")
-	_check(valid_sizes, "Buildings retain 16-metre footprints; residences use a 3m-per-floor calibrated height")
+	_check(valid_grid and ids.size() == 20 and cells.size() == 20, "Every rectangular grid cell has one unique building ID")
+	_check(valid_sizes, "Buildings use a compact 14 by 10 metre rectangular footprint; residences use a 3m-per-floor calibrated height")
 	_check(valid_doors, "Service doors lie outside their building footprint on the south access strip")
-	_check(counts == {"residential": 15, "shop": 3, "office": 3, "medical": 2, "police": 2}, "Every seed includes all five intended building categories")
-	_check(_near(city_map.road_width, 8.0) and _near(city_map.block_size, 24.0), "Street gaps are eight metres between 16-metre buildings")
-	_check(city_map.land_rect == Rect2(-64.0, -64.0, 128.0, 128.0), "Land extends to plus or minus 64 metres")
-	_check(city_map.shallow_rect == Rect2(-88.0, -88.0, 176.0, 176.0), "The shallow shelf extends 24 metres beyond every land edge")
+	_check(counts == {"residential": 12, "shop": 3, "factory": 3, "medical": 1, "police": 1}, "Every seed includes residential, shop, factory, medical and police categories")
+	_check(_near(city_map.road_width, 8.0) and _near(city_map.block_size_x, 22.0) and _near(city_map.block_size_z, 18.0), "Street gaps are eight metres around compact rectangular buildings")
+	_check(city_map.land_rect == Rect2(-59.0, -40.0, 118.0, 80.0), "Land follows the compact rectangular district")
+	_check(city_map.shallow_rect == Rect2(-81.0, -58.0, 162.0, 116.0), "The shallow shelf follows every rectangular land edge")
 	_check(city_map.encounters_data.size() == 8 and floor_scene.encounters.size() == 8, "Eight street encounters are generated")
 	var unique_encounters: Dictionary = {}
 	var valid_encounters := true
@@ -93,7 +96,7 @@ func _test_seeded_layout() -> void:
 		var a: Vector3 = data["endpoint_a"]
 		var b: Vector3 = data["endpoint_b"]
 		var axis: Vector3 = data["axis"]
-		valid_encounters = valid_encounters and not unique_encounters.has(at) and _near(a.distance_to(b), 24.0) and at.is_equal_approx((a + b) * 0.5)
+		valid_encounters = valid_encounters and not unique_encounters.has(at) and (_near(a.distance_to(b), 22.0) or _near(a.distance_to(b), 18.0)) and at.is_equal_approx((a + b) * 0.5)
 		valid_encounters = valid_encounters and (axis.is_equal_approx(Vector3.RIGHT) or axis.is_equal_approx(Vector3.BACK))
 		valid_encounters = valid_encounters and (_on_street_line(at.x) or _on_street_line(at.z)) and at.distance_to(city_map.spawn_position) > 10.0
 		unique_encounters[at] = true
@@ -102,45 +105,76 @@ func _test_seeded_layout() -> void:
 
 func _test_city_geometry() -> void:
 	var all_clear := true
-	for line in STREETS:
-		all_clear = all_clear and _ray_clear(Vector3(line, 0.8, -60.0), Vector3(line, 0.8, 60.0))
-		all_clear = all_clear and _ray_clear(Vector3(-60.0, 0.8, line), Vector3(60.0, 0.8, line))
-	_check(all_clear, "All six north-south and east-west streets are physically open end to end")
+	for line in STREETS_X:
+		all_clear = all_clear and _ray_clear(Vector3(line, 0.8, -36.0), Vector3(line, 0.8, 36.0))
+	for line in STREETS_Z:
+		all_clear = all_clear and _ray_clear(Vector3(-55.0, 0.8, line), Vector3(55.0, 0.8, line))
+	_check(all_clear, "All rectangular north-south and east-west streets are physically open end to end")
 	var visited := {Vector2i(0, 0): true}
 	var queue: Array[Vector2i] = [Vector2i.ZERO]
 	while not queue.is_empty():
 		var cell: Vector2i = queue.pop_front()
 		for step in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var neighbour: Vector2i = cell + step
-			if neighbour.x < 0 or neighbour.x > 5 or neighbour.y < 0 or neighbour.y > 5 or visited.has(neighbour):
+			if neighbour.x < 0 or neighbour.x > 5 or neighbour.y < 0 or neighbour.y > 4 or visited.has(neighbour):
 				continue
-			var from := Vector3(STREETS[cell.x], 0.8, STREETS[cell.y])
-			var to := Vector3(STREETS[neighbour.x], 0.8, STREETS[neighbour.y])
+			var from := Vector3(STREETS_X[cell.x], 0.8, STREETS_Z[cell.y])
+			var to := Vector3(STREETS_X[neighbour.x], 0.8, STREETS_Z[neighbour.y])
 			if _ray_clear(from, to):
 				visited[neighbour] = true
 				queue.append(neighbour)
-	_check(visited.size() == 36, "Actual collision geometry connects all 36 street intersections")
-	await _park(Vector3(-12.0, 0.0, 60.0))
+	_check(visited.size() == 30, "Actual collision geometry connects all 30 rectangular street intersections")
+	await _park(Vector3(-11.0, 0.0, 36.0))
 	Input.action_press("move_up")
 	await _steps(120)
 	_release_all()
-	_check(player.is_on_floor() and player.global_position.z < 49.5 and _near(player.global_position.x, -12.0, 0.03), "The player can walk along the north-south street without snagging buildings")
-	await _park(Vector3(-12.0, 0.0, 60.0))
+	_check(player.is_on_floor() and player.global_position.z < 29.5 and _near(player.global_position.x, -11.0, 0.03), "The player can walk along the north-south street without snagging buildings")
+	await _park(Vector3(-11.0, 0.0, 36.0))
 	Input.action_press("move_right")
 	await _steps(140)
 	_release_all()
-	_check(player.is_on_floor() and player.global_position.x > -0.5 and _near(player.global_position.z, 60.0, 0.03), "The player can walk along the east-west street and cross an intersection")
-	var building: Dictionary = city_map.building_data[12]
-	var center: Vector3 = building["position"]
-	await _park(center + Vector3(0.0, 0.0, 11.0))
+	_check(player.is_on_floor() and player.global_position.x > -0.5 and _near(player.global_position.z, 36.0, 0.03), "The player can walk along the east-west street and cross an intersection")
+	var surface_collisions := true
+	var shared_shapes: Dictionary = {}
+	var variant_count := 0
+	var residence: Dictionary = {}
+	for data: Dictionary in city_map.building_data:
+		if data["kind"] in ["medical", "police"]:
+			continue
+		var building_node: Node3D = city_map._generated.get_node("Building_%02d_%s" % [data["id"], data["kind"]])
+		var body := building_node.get_node("BuildingCollision") as StaticBody3D
+		var surface := body.get_node_or_null("ModelSurface") as CollisionShape3D
+		surface_collisions = surface_collisions and surface != null and surface.shape is ConcavePolygonShape3D
+		for child in body.get_children():
+			if child is CollisionShape3D and child.shape is BoxShape3D:
+				surface_collisions = surface_collisions and child.shape.size.y <= 0.221
+		var key := "%s_%d" % [data["kind"], data["model_index"]]
+		if shared_shapes.has(key):
+			surface_collisions = surface_collisions and surface.shape == shared_shapes[key]
+		else:
+			shared_shapes[key] = surface.shape
+			variant_count += 1
+		if data["kind"] == "residential" and data["model_index"] == 0:
+			residence = data
+	_check(surface_collisions and variant_count >= 5, "Imported buildings share baked surface collisions; only the visible 22 cm plinth is a box")
+	_check(not residence.is_empty(), "The geometry test seed includes the reference residence")
+	var residential_center: Vector3 = residence["position"]
+	# This facade is recessed from the 14 x 10 lot edge. The capsule must step
+	# onto its concrete plinth and reach the actual wall, not stop at the parcel.
+	await _park(residential_center + Vector3(0.0, 0.0, 6.5))
 	Input.action_press("move_up")
-	await _steps(70)
+	await _steps(90)
 	_release_all()
-	_check(player.global_position.z > center.z + 8.25 and player.global_position.z < center.z + 8.5, "Building facades are solid and stop the player's capsule at their real footprint")
+	_check(player.global_position.z < residential_center.z + 4.8 and player.global_position.z > residential_center.z + 2.5, "The player reaches the recessed residence facade and cannot walk through its visible wall")
+	_check(player.is_on_floor() and player.global_position.y >= 0.20, "Walking onto the visible building plinth needs no jump")
 
 
 func _test_occlusion_transparency() -> void:
-	var data: Dictionary = city_map.building_data[12]
+	for kind in ["residential", "shop", "factory"]:
+		await _test_building_occlusion(_service(kind).data)
+
+
+func _test_building_occlusion(data: Dictionary) -> void:
 	var building_id := int(data["id"])
 	city_map._set_building_occluded(building_id, true)
 	city_map._update_occlusion_fades(1.0 / 60.0)
@@ -185,23 +219,36 @@ func _test_occlusion_transparency() -> void:
 	for record: Dictionary in visuals["occlusion_records"]:
 		restored = restored and (record["node"] as GeometryInstance3D).material_override == record["material"]
 	_check(restored and not outline.visible, "Restoring the camera view returns the building to full opacity")
+	# The runtime ray must still discover the building after the parcel-wide
+	# collider is removed; rendering and collision remain independent.
+	var camera := Camera3D.new()
+	floor_scene.add_child(camera)
+	var center: Vector3 = data["position"]
+	camera.global_position = center + Vector3(0.0, 2.5, -9.0)
+	await _park(center + Vector3(0.0, 0.0, 7.0))
+	camera.look_at(player.global_position + Vector3.UP * 1.1)
+	city_map.update_occlusion(camera, player)
+	_check(building_id in city_map._occluded_ids, "Camera occlusion rays detect the actual %s model surfaces" % data["kind"])
+	city_map._set_building_occluded(building_id, false)
+	city_map._update_occlusion_fades(1.0)
+	camera.queue_free()
 
 
 func _test_water_physics() -> void:
 	var zones_valid := true
-	for point in [Vector3(0, 0, 63), Vector3(63, 0, 0), Vector3(-63, 0, -63)]:
+	for point in [Vector3(0, 0, 39), Vector3(58, 0, 0), Vector3(-58, 0, -39)]:
 		zones_valid = zones_valid and city_map.get_water_zone(point) == "land"
-	var shelf_points: Array[Vector3] = [Vector3(0, 0.5, 76), Vector3(0, 0.5, -76), Vector3(76, 0.5, 0), Vector3(-76, 0.5, 0), Vector3(76, 0.5, 76), Vector3(-76, 0.5, 76), Vector3(76, 0.5, -76), Vector3(-76, 0.5, -76)]
+	var shelf_points: Array[Vector3] = [Vector3(0, 0.5, 50), Vector3(0, 0.5, -50), Vector3(70, 0.5, 0), Vector3(-70, 0.5, 0), Vector3(70, 0.5, 50), Vector3(-70, 0.5, 50), Vector3(70, 0.5, -50), Vector3(-70, 0.5, -50)]
 	for point in shelf_points:
 		zones_valid = zones_valid and city_map.get_water_zone(point) == "shallow"
-	for point in [Vector3(0, 0, 89), Vector3(89, 0, 0), Vector3(-89, 0, -89)]:
+	for point in [Vector3(0, 0, 100), Vector3(100, 0, 0), Vector3(-100, 0, -100)]:
 		zones_valid = zones_valid and city_map.get_water_zone(point) == "deep"
 	_check(zones_valid, "Water classification distinguishes land, all shelf sides and corners, and deep water")
 	for point in shelf_points:
 		await _park(point)
 		await _steps(50)
 		_check(player.is_on_floor() and not player.is_dead and player.global_position.y > -0.7 and player.global_position.y < -0.25 and floor_scene.water_zone == "shallow", "Shallow water has a real standing shelf at %s" % str(Vector2(point.x, point.z)))
-	await _park(Vector3(-12.0, 0.0, 62.0))
+	await _park(Vector3(-11.0, 0.0, 38.0))
 	Input.action_press("move_down")
 	await _steps(100)
 	_release_all()
@@ -236,7 +283,7 @@ func _test_water_physics() -> void:
 
 
 func _test_water_effects() -> void:
-	await _park(Vector3(0.0, 0.5, 76.0))
+	await _park(Vector3(0.0, 0.5, 50.0))
 	await _steps(190)
 	_check(_active_ripple_count() == 0, "Standing in water lets the initial contact ripple expire")
 	Input.action_press("move_right")
@@ -271,7 +318,7 @@ func _test_water_effects() -> void:
 	await _steps(40)
 	_release_all()
 	_check(floor_scene.water_zone == "land" and _active_ripple_count() == 0, "Ordinary walking on the street produces no water ripples")
-	await _park(Vector3(0.0, 0.5, 76.0))
+	await _park(Vector3(0.0, 0.5, 50.0))
 	await _steps(45)
 	_check(_active_ripple_count() > 0, "The actor is followed by water effects after retrying")
 	await _new_floor(TEST_SEED)
@@ -290,9 +337,9 @@ func _test_services() -> void:
 	var shop := _service("shop")
 	var medical := _service("medical")
 	var police := _service("police")
-	var office := _service("office")
+	var factory := _service("factory")
 	var residential := _service("residential")
-	_check(shop != null and medical != null and police != null and office != null and residential != null, "Every building interaction type is present in the actual scene")
+	_check(shop != null and medical != null and police != null and factory != null and residential != null, "Every building interaction type is present in the actual scene")
 	_check(floor_scene.credits == 40 and not floor_scene.try_interact(), "The run begins with 40 credit and cannot activate remote buildings")
 	await _park(shop.global_position)
 	_check(shop.can_interact(), "The shop service marker is reachable from its street")
@@ -330,32 +377,33 @@ func _test_services() -> void:
 	_check(police.used and floor_scene.credits == 20 and deck.total_cards == total_before + 1, "Police equipment awards one card and 20 credit")
 	await _press_interact()
 	_check(floor_scene.credits == 20 and deck.total_cards == total_before + 1, "The police cache cannot be claimed twice")
-	await _park(office.global_position)
+	await _park(factory.global_position)
 	player.energy = 2.0
 	var credits_before: int = floor_scene.credits
 	total_before = deck.total_cards
 	await _press_interact()
 	var event_correct := false
-	match int(office.event_index):
+	match int(factory.event_index):
 		0: event_correct = floor_scene.credits == credits_before + 15 and deck.total_cards == total_before
 		1: event_correct = _near(player.energy, player.max_energy) and floor_scene.credits == credits_before
 		2: event_correct = deck.total_cards == total_before + 1 and floor_scene.credits == credits_before
-	_check(office.used and event_correct, "Office E interaction resolves its seeded credit, energy or memory event")
+	_check(factory.used and event_correct, "Factory E interaction resolves its seeded credit, energy or memory event")
 	credits_before = floor_scene.credits
 	total_before = deck.total_cards
 	await _press_interact()
-	_check(floor_scene.credits == credits_before and deck.total_cards == total_before, "The same office event cannot award resources twice")
+	_check(floor_scene.credits == credits_before and deck.total_cards == total_before, "The same factory event cannot award resources twice")
 	await _park(residential.global_position)
 	_check(not floor_scene.try_interact(), "Residential blocks remain scenery without an unintended reward")
 	for kind in CATALOG.kinds():
 		deck.unlock_kind(kind)
+	var full_collection_count := 10 + CATALOG.kinds().size() - CATALOG.STARTING_UNLOCKS.size()
 	await _park(shop.global_position)
 	floor_scene.credits = 20
 	await _press_interact()
-	_check(floor_scene.credits == 20 and deck.total_cards == 17, "A completed collection and full energy leave shop credit untouched")
+	_check(floor_scene.credits == 20 and deck.total_cards == full_collection_count, "A completed collection and full energy leave shop credit untouched")
 	player.energy = 1.0
 	await _press_interact()
-	_check(floor_scene.credits == 10 and _near(player.energy, player.max_energy) and deck.total_cards == 17, "After every card is restored, the shop sells one energy refill for ten credit")
+	_check(floor_scene.credits == 10 and _near(player.energy, player.max_energy) and deck.total_cards == full_collection_count, "After every card is restored, the shop sells one energy refill for ten credit")
 	_check(_deck_valid(), "Exploration rewards preserve unique physical card IDs and zone conservation")
 
 
@@ -399,13 +447,13 @@ func _test_restart_and_new_floor() -> void:
 	var previous_seed: int = floor_scene.map_seed
 	var layout_before := _layout_snapshot()
 	var cards_before: int = deck.total_cards
-	var offices_before := _office_events()
+	var factories_before := _factory_events()
 	_send_key(KEY_R)
 	await _steps(3)
 	_sync_map()
 	_freeze_encounters()
 	_check(floor_scene.map_seed == previous_seed and _layout_snapshot() == layout_before, "R retries the same seeded district")
-	_check(_office_events() == offices_before and floor_scene.credits == 40, "Retry resets credit while preserving seeded office outcomes")
+	_check(_factory_events() == factories_before and floor_scene.credits == 40, "Retry resets credit while preserving seeded factory outcomes")
 	_check(deck.total_cards == cards_before and _deck_valid(), "Retry preserves discovered actions and reconstructs their physical cards")
 	var state_reset := true
 	for service in floor_scene.services:
@@ -474,10 +522,10 @@ func _layout_snapshot() -> Dictionary:
 	return {"buildings": city_map.building_data.duplicate(true), "encounters": city_map.encounters_data.duplicate(true)}
 
 
-func _office_events() -> Dictionary:
+func _factory_events() -> Dictionary:
 	var events: Dictionary = {}
 	for service in floor_scene.services:
-		if str(service.kind) == "office":
+		if str(service.kind) == "factory":
 			events[service.building_id] = service.event_index
 	return events
 
@@ -488,7 +536,7 @@ func _ray_clear(from: Vector3, to: Vector3) -> bool:
 
 
 func _on_street_line(value: float) -> bool:
-	for line in STREETS:
+	for line in STREETS_X + STREETS_Z:
 		if _near(value, line):
 			return true
 	return false

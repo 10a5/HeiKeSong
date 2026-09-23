@@ -43,6 +43,7 @@ func _ready() -> void:
 	hud.pause_requested.connect(toggle_pause)
 	hud.browser_requested.connect(open_card_browser)
 	hud.browser_close_requested.connect(close_card_browser)
+	_setup_adaptive_brain()
 	city_overlay = OVERLAY.new()
 	city_overlay.name = "CityOverlay"
 	canvas.add_child(city_overlay)
@@ -133,6 +134,10 @@ func regenerate_floor(seed_value: int = -1) -> void:
 		encounter.setup(data, player, self)
 		encounters.append(encounter)
 	enemy = encounters[0].foe if not encounters.is_empty() else null
+	if is_instance_valid(boss_brain):
+		boss_brain.reset_observation()
+		if boss_brain.has_method("attach_opponent"):
+			boss_brain.attach_opponent(enemy)
 	player.bounds_enabled = false
 	player.spawn_position = city_map.spawn_position
 	player.reset_player()
@@ -157,7 +162,7 @@ func regenerate_floor(seed_value: int = -1) -> void:
 
 func _configure_floor_hud() -> void:
 	hud.set_location("神经断层", "第一层 · 水岸街区", "R  重试本图")
-	hud.card_browser.discovery_hint = "商店 / 写字楼 / 公安局"
+	hud.card_browser.discovery_hint = "商店 / 工厂 / 公安局"
 	hud.get_node("pause_hint").text = "ESC 继续 / R 重试 / N 新地图"
 	hud.set_defeat_text("探索失败 · 按 R 重试", "N 生成新的第一层")
 
@@ -171,11 +176,19 @@ func _physics_process(delta: float) -> void:
 		return
 	super._physics_process(delta)
 	_update_water()
-	city_map.update_occlusion(camera, player)
 	_light_update_left -= delta
 	if _light_update_left <= 0.0:
 		_light_update_left = 0.20
 		_update_window_lights()
+
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	if paused or player.is_dead or not is_instance_valid(city_map):
+		return
+	# Match the camera pose used to draw this frame, including mouse orbit and
+	# follow smoothing, instead of testing the previous physics frame's view.
+	city_map.update_occlusion(camera, player)
 
 
 func _update_window_lights() -> void:
@@ -184,7 +197,7 @@ func _update_window_lights() -> void:
 	var candidates: Array[Vector3] = []
 	for building: Dictionary in city_map.building_data:
 		if building["kind"] == "residential":
-			candidates.append(building["position"] + Vector3(0, 2.4, 8.55))
+			candidates.append(building.get("door_position", building["position"]))
 	candidates.sort_custom(func(a: Vector3, b: Vector3) -> bool:
 		return a.distance_squared_to(player.global_position) < b.distance_squared_to(player.global_position)
 	)

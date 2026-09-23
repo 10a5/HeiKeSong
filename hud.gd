@@ -775,13 +775,18 @@ func _draw_keycap(rect: Rect2, accent: Color) -> void:
 
 
 func _draw_card_icon(center: Vector2, kind: String, accent: Color) -> void:
-	if kind == "punch":
+	if kind == "punch" or kind == "slash":
 		draw_rect(Rect2(center + Vector2(-10, -8), Vector2(19, 16)), accent, false, 2.0)
 		for index in range(3):
 			var x := center.x - 5.0 + index * 5.0
 			draw_line(Vector2(x, center.y - 8), Vector2(x, center.y - 2), accent, 1.5)
 		draw_line(center + Vector2(9, -2), center + Vector2(14, 2), accent, 3.0)
 		draw_line(center + Vector2(14, 2), center + Vector2(7, 10), accent, 3.0)
+		return
+	if kind == "sweep":
+		draw_arc(center + Vector2(0, 5), 18, -0.25, PI + 0.25, 24, accent, 3.0, true)
+		draw_line(center + Vector2(-13, 5), center + Vector2(-5, -8), accent, 2.0, true)
+		draw_line(center + Vector2(13, 5), center + Vector2(5, -8), accent, 2.0, true)
 		return
 	if kind == "shot":
 		draw_rect(Rect2(center + Vector2(-16, -4), Vector2(19, 8)), accent, false, 2.0)

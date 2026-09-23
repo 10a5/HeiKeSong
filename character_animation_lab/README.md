@@ -14,7 +14,7 @@ Godot 自带 `Skeleton3D` 骨骼 gizmo 和 `AnimationPlayer` 动画时间轴，�
 6. 点击 AnimationPlayer 的保存按钮，场景会保存动画库。动画也可以从 Animation 面板菜单 **Save As...** 单独保存成 `exports/*.tres`。
 7. 在主项目中把 `.tres` 拖入 AnimationPlayer 的 AnimationLibrary，或把 FBX 角色场景替换为这个项目制作的角色场景。
 
-> 目前模型只有骨架和蒙皮，没有自带可编辑动画片段；这是预期行为。所有动作都由本项目中的 AnimationPlayer 关键帧记录。
+> 工作台已预置一套由 `AnimationPlayer` 关键帧组成的动作库，打开 Animation 面板即可查看和修改。角色 FBX 本身只提供骨架与蒙皮，动作资源保存在 `animations/player_actions.tres`，不会写回源模型。
 
 ## 资源引用策略
 

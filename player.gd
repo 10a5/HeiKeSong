@@ -4,6 +4,7 @@ extends CharacterBody3D
 
 signal energy_changed(current: float, maximum: float)
 signal action_played(action_name: String, cost: float)
+signal action_attempted(action_name: String, accepted: bool, reason: String)
 signal status_changed(message: String, is_error: bool)
 signal cybernetic_changed(active_time_left: float, cooldown_left: float)
 signal health_changed(current: float, maximum: float)
@@ -13,7 +14,7 @@ signal defeated()
 const COMBAT = preload("res://combat_hit.gd")
 const CARD_CATALOG = preload("res://card_catalog.gd")
 const CHARACTER_VISUAL = preload("res://character_visual.gd")
-const ROLL_ATTACKS: Array[String] = ["punch", "slash", "shot"]
+const ROLL_ATTACKS: Array[String] = ["punch", "slash", "sweep", "shot"]
 
 @export var move_speed: float = 5.5
 @export_range(60.0, 720.0, 15.0) var turn_speed_degrees: float = 360.0
@@ -21,8 +22,10 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "shot"]
 @export var jump_speed: float = 8.0
 @export var gravity: float = 24.0
 @export var max_fall_speed: float = 30.0
-@export var roll_speed: float = 14.0
-@export var roll_duration: float = 0.22
+@export_range(0.0, 0.5, 0.01) var max_step_height: float = 0.30
+## The roll keeps its original travel distance while moving at half speed.
+@export var roll_speed: float = 7.0
+@export var roll_duration: float = 0.44
 @export var dash_speed: float = 16.0
 @export var dash_duration: float = 0.24
 @export var max_energy: float = 10.0
@@ -48,6 +51,9 @@ const ROLL_ATTACKS: Array[String] = ["punch", "slash", "shot"]
 @export_group("Additional Card Actions")
 @export var punch_damage: float = 12.0
 @export var punch_reach: float = 1.05
+@export var sweep_damage: float = 22.0
+@export var sweep_reach: float = 1.65
+@export var sweep_visual_duration: float = 0.18
 @export var shot_damage: float = 18.0
 @export var shot_range: float = 10.0
 @export var charged_slash_damage: float = 45.0
@@ -111,6 +117,10 @@ var slash_direction: Vector3 = Vector3.FORWARD
 var _dash_slash_started: bool = false
 var _slash_is_dash: bool = false
 var _active_slash_duration: float = 0.14
+## Monotonically increasing token for visual action clips.  Gameplay actions
+## can hand off from a dash into its hit window without restarting the same
+## visual clip, while a newly played card can interrupt a visual tail.
+var _action_visual_token: int = 0
 var _trail: Array[Dictionary] = []
 var _trail_clock: float = 0.0
 var _life_time: float = 0.0
@@ -130,6 +140,7 @@ var _body_material: StandardMaterial3D
 var _implant_material: StandardMaterial3D
 var _cybernetic_ring: MeshInstance3D
 var _cybernetic_trail_clock: float = 0.0
+var _step_support_active: bool = false
 
 
 func _ready() -> void:
@@ -141,6 +152,7 @@ func _ready() -> void:
 
 func reset_player() -> void:
 	set_physics_process(true)
+	_action_visual_token += 1
 	energy = max_energy
 	health = max_health
 	is_dead = false
@@ -152,6 +164,7 @@ func reset_player() -> void:
 	_clear_extra_actions()
 	global_position = spawn_position
 	velocity = Vector3.ZERO
+	_step_support_active = false
 	gravity_scale = 1.0
 	vertical_acceleration = 0.0
 	facing = Vector3.FORWARD
@@ -178,6 +191,8 @@ func reset_player() -> void:
 	_life_time = 0.0
 	_walk_phase = 0.0
 	_clamp_to_arena()
+	if is_instance_valid(_character_visual) and _character_visual.has_method("reset_pose"):
+		_character_visual.reset_pose()
 	_update_model(Vector3.ZERO)
 	energy_changed.emit(energy, max_energy)
 	health_changed.emit(health, max_health)
@@ -189,6 +204,7 @@ func _physics_process(delta: float) -> void:
 	_life_time += delta
 	_damage_flash_left = maxf(0.0, _damage_flash_left - delta)
 	if is_dead:
+		_step_support_active = false
 		_update_visual_timers(delta)
 		_update_vertical_velocity(delta)
 		velocity.x = 0.0
@@ -215,12 +231,16 @@ func _physics_process(delta: float) -> void:
 	_update_visual_heading(delta)
 	_update_vertical_velocity(delta)
 	if is_diving:
+		_step_support_active = false
 		_advance_dive(delta)
 	elif is_rolling:
+		_step_support_active = false
 		_advance_roll(delta)
 	elif is_dashing:
+		_step_support_active = false
 		_advance_dash(delta)
 	elif air_move_time_left > 0.0:
+		_step_support_active = false
 		air_move_time_left = maxf(0.0, air_move_time_left - delta)
 		velocity.x = air_move_direction.x * air_move_speed
 		velocity.z = air_move_direction.z * air_move_speed
@@ -233,7 +253,7 @@ func _physics_process(delta: float) -> void:
 			speed *= 0.35
 		velocity.x = input_direction.x * speed
 		velocity.z = input_direction.z * speed
-		move_and_slide()
+		_move_with_steps(delta)
 		_clamp_to_arena()
 	_apply_slash_hits()
 	_update_cybernetic(delta)
@@ -249,10 +269,76 @@ func _physics_process(delta: float) -> void:
 		_cybernetic_trail_clock = 0.0
 
 
+func _move_with_steps(delta: float) -> void:
+	# Only grounded walking can climb a small riser. Jump, flight and card
+	# movement keep their existing vertical motion and collision behaviour.
+	var can_step := (is_on_floor() or _step_support_active) and velocity.y <= 0.0 and max_step_height > 0.0
+	var can_snap := can_step
+	_step_support_active = false
+	var horizontal_motion := Vector3(velocity.x, 0.0, velocity.z) * delta
+	if can_step and not horizontal_motion.is_zero_approx():
+		_try_step_up(horizontal_motion)
+	move_and_slide()
+	if can_snap and not is_on_floor() and velocity.y <= 0.0:
+		_snap_down_step()
+
+
+func _try_step_up(horizontal_motion: Vector3) -> void:
+	var obstacle := KinematicCollision3D.new()
+	if not test_move(global_transform, horizontal_motion, obstacle):
+		return
+	if obstacle.get_normal().dot(Vector3.UP) >= cos(floor_max_angle):
+		return
+	# A capsule first meets the edge with its rounded foot, whose contact
+	# normal is not the tread normal. Check the actual surface just ahead.
+	var probe := global_position + horizontal_motion + horizontal_motion.normalized() * radius
+	var query := PhysicsRayQueryParameters3D.create(probe + Vector3.UP * (max_step_height + 0.01), probe, collision_mask)
+	query.exclude = [get_rid()]
+	var landing := get_world_3d().direct_space_state.intersect_ray(query)
+	if landing.is_empty() or (landing["normal"] as Vector3).dot(Vector3.UP) < cos(floor_max_angle):
+		return
+	var rise := (landing["position"] as Vector3).y - global_position.y
+	if rise <= 0.005 or rise > max_step_height + 0.001:
+		return
+	# Sweep the entire capsule upward and across before committing movement;
+	# a low ceiling or a taller wall makes the step impossible.
+	var raised := global_transform
+	var lift := Vector3.UP * (rise + safe_margin)
+	if test_move(raised, lift):
+		return
+	raised.origin += lift
+	if test_move(raised, horizontal_motion):
+		return
+	global_position.y += lift.y
+
+
+func _snap_down_step() -> void:
+	# At a descending edge the rounded capsule can report a steep contact
+	# normal against the upper tread. Verify the lower tread itself with a
+	# ray, then sweep down safely and keep following it across that edge.
+	var query := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * 0.01, global_position + Vector3.DOWN * (max_step_height + 0.01), collision_mask)
+	query.exclude = [get_rid()]
+	var floor_hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if floor_hit.is_empty() or (floor_hit["normal"] as Vector3).dot(Vector3.UP) < cos(floor_max_angle):
+		return
+	var drop := global_position.y - (floor_hit["position"] as Vector3).y
+	if drop < -safe_margin or drop > max_step_height + 0.01:
+		return
+	var landing := KinematicCollision3D.new()
+	if not test_move(global_transform, Vector3.DOWN * (maxf(0.0, drop) + safe_margin), landing):
+		return
+	global_position += landing.get_travel()
+	velocity.y = 0.0
+	_step_support_active = true
+	apply_floor_snap()
+
+
 func request_jump() -> bool:
-	if is_dead or get_tree().paused or is_action_locked() or not is_on_floor() or velocity.y > 0.0:
+	if is_dead or get_tree().paused or is_action_locked() or not (is_on_floor() or _step_support_active) or velocity.y > 0.0:
 		return false
 	velocity.y = jump_speed
+	_step_support_active = false
+	_action_visual_token += 1
 	_update_model(_get_input_direction())
 	status_changed.emit("跳跃 · 可在空中移动与出牌", false)
 	return true
@@ -262,7 +348,7 @@ func _update_vertical_velocity(delta: float) -> void:
 	var acceleration := vertical_acceleration - gravity * gravity_scale
 	# The previous move may still report floor contact on the takeoff frame.
 	# Preserve a positive jump velocity and allow lift to leave the floor.
-	if is_on_floor() and velocity.y <= 0.0:
+	if (is_on_floor() or _step_support_active) and velocity.y <= 0.0:
 		velocity.y = 0.0
 		if acceleration < 0.0:
 			velocity.y = -0.1
@@ -341,9 +427,11 @@ func get_card_cost(kind: String) -> float:
 
 func request_card(kind: String) -> bool:
 	if not can_chain_card(kind):
+		action_attempted.emit(kind, false, "blocked")
 		return false
 	var cost := get_card_cost(kind)
 	if energy < cost:
+		action_attempted.emit(kind, false, "no_energy")
 		status_changed.emit("能量不足", true)
 		return false
 	# Resolve direction at the actual input event, including HUD card clicks.
@@ -357,6 +445,7 @@ func request_card(kind: String) -> bool:
 	else:
 		facing = direction
 	energy -= cost
+	_action_visual_token += 1
 	energy_changed.emit(energy, max_energy)
 	var chained := combo_window_left > 0.0 or slash_time_left > 0.0 or is_rolling
 	# Movement cards may cancel a heavy windup or a previous swing's recovery.
@@ -371,7 +460,11 @@ func request_card(kind: String) -> bool:
 		"punch":
 			_start_melee(direction, kind, punch_damage, punch_reach, 0.09, deg_to_rad(42.0), melee_vertical_reach)
 		"slash":
-			_start_slash_visual(direction, false, chained)
+			# Legacy card id retained for deck/save compatibility; its action is now
+			# the imported punch animation rather than a sword slash.
+			_start_melee(direction, kind, slash_damage, slash_reach, slash_visual_duration if not chained else combo_slash_duration, deg_to_rad(48.0), melee_vertical_reach)
+		"sweep":
+			_start_melee(direction, kind, sweep_damage, sweep_reach, sweep_visual_duration, deg_to_rad(100.0), 0.65)
 		"shot":
 			_fire_shot(direction)
 		"charged_slash":
@@ -418,6 +511,7 @@ func request_card(kind: String) -> bool:
 			velocity.y = 6.0 if dive_startup_left > 0.0 else -22.0
 	combo_window_left = combo_window_duration
 	action_played.emit(kind, cost)
+	action_attempted.emit(kind, true, "accepted")
 	status_changed.emit(CARD_CATALOG.card_name(kind), false)
 	_update_model(Vector3.ZERO)
 	return true
@@ -463,8 +557,10 @@ func _start_melee(direction: Vector3, kind: String, damage: float, reach: float,
 	slash_time_left = duration
 	_slash_targets_hit.clear()
 	var color := Color("ffae48")
-	if kind == "punch":
+	if kind == "punch" or kind == "slash":
 		color = Color("fff6b0")
+	elif kind == "sweep":
+		color = Color("8ff0ff")
 	elif kind == "airborne_slash":
 		color = Color("6ceaff")
 	elif kind == "dash_slash":
@@ -644,7 +740,8 @@ func become_lost() -> void:
 
 
 func _advance_roll(delta: float) -> void:
-	# Scale the final physics frame to keep a full roll at exactly 3.08 m.
+	# The speed and duration are paired so a complete roll still travels about
+	# 3.08 m while taking twice as long to make the forward rotation readable.
 	var step := minf(delta, roll_time_left)
 	var frame_speed := roll_speed * (step / delta if delta > 0.0 else 0.0)
 	velocity.x = roll_direction.x * frame_speed
@@ -658,6 +755,12 @@ func _advance_roll(delta: float) -> void:
 		_update_model(Vector3.ZERO)
 		_add_trail()
 	if roll_time_left <= 0.0:
+		# Publish the exact terminal progress while the roll state is still
+		# active. The visual controller uses this normalized value to seek the
+		# authored final roll key on the same physics frame as the last metre of
+		# movement; clearing is_rolling first would make it miss progress == 1.
+		roll_time_left = 0.0
+		_update_model(Vector3.ZERO)
 		is_rolling = false
 		velocity.x = 0.0
 		velocity.z = 0.0
@@ -677,7 +780,7 @@ func _advance_dash(delta: float) -> void:
 	if not _dash_slash_started and dash_time_left <= dash_duration * 0.5:
 		_dash_slash_started = true
 		_start_slash_visual(dash_direction, true)
-		status_changed.emit("冲刺挥砍 · 突进后横扫", false)
+		status_changed.emit("突进出拳 · 接近后命中", false)
 	_trail_clock += step
 	if _trail_clock >= 0.035:
 		_trail_clock = 0.0
@@ -687,7 +790,7 @@ func _advance_dash(delta: float) -> void:
 		is_dashing = false
 		velocity.x = 0.0
 		velocity.z = 0.0
-		status_changed.emit("冲刺挥砍完成 · 能量持续恢复", false)
+		status_changed.emit("突进出拳完成 · 能量持续恢复", false)
 
 
 func _clamp_to_arena() -> void:
@@ -739,6 +842,22 @@ func _add_trail(from_cybernetic: bool = false) -> void:
 	_trail.append({"node": echo, "material": material, "life": 0.2})
 
 
+func _current_visual_action_duration() -> float:
+	# The combat timers remain short so hit windows and movement stay responsive.
+	# The character visual controller uses this as the base window for its
+	# independent, slowed animation tail.
+	var duration := 0.14
+	if slash_time_left > 0.0:
+		duration = maxf(_active_slash_duration, 0.01)
+	if is_rolling:
+		duration = maxf(duration, roll_duration)
+	if is_dashing:
+		duration = maxf(duration, dash_duration)
+	if charge_time_left > 0.0:
+		duration = maxf(duration, charged_slash_windup)
+	return duration
+
+
 func _update_model(input_direction: Vector3) -> void:
 	if not is_instance_valid(_heading):
 		return
@@ -748,7 +867,7 @@ func _update_model(input_direction: Vector3) -> void:
 	_implant_material.albedo_color = Color("ffe18a") if is_cybernetic_active else Color("74c8bb")
 	_cybernetic_ring.visible = is_cybernetic_active
 	_cybernetic_ring.scale = Vector3.ONE * (1.0 + sin(_life_time * 12.0) * 0.07)
-	var airborne := not is_on_floor() or velocity.y > 0.0
+	var airborne := not (is_on_floor() or _step_support_active) or velocity.y > 0.0
 	var horizontal_speed := Vector2(velocity.x, velocity.z).length()
 	var walking := input_direction.length() > 0.01 and horizontal_speed > 0.05 and not is_action_locked() and not airborne
 	var stride_strength := clampf(horizontal_speed / maxf(move_speed, 0.001), 0.0, 1.0)
@@ -757,9 +876,27 @@ func _update_model(input_direction: Vector3) -> void:
 	var dash_progress := 1.0 - dash_time_left / maxf(dash_duration, 0.001) if is_dashing else -1.0
 	var slash_progress := 1.0 - slash_time_left / maxf(_active_slash_duration, 0.001) if slash_time_left > 0.0 else -1.0
 	var charge_amount := 1.0 - charge_time_left / maxf(charged_slash_windup, 0.001) if charge_time_left > 0.0 else 0.0
+	var visual_state := "idle"
+	if is_dead:
+		visual_state = "dead"
+	elif is_diving:
+		visual_state = "dive"
+	elif charge_time_left > 0.0:
+		visual_state = "charged_slash"
+	elif slash_time_left > 0.0:
+		visual_state = _active_attack_kind
+	elif is_dashing:
+		visual_state = "dash_slash"
+	elif is_rolling:
+		visual_state = "roll"
+	elif airborne:
+		visual_state = "jump"
+	elif walking:
+		visual_state = "walk"
 	if is_instance_valid(_character_visual) and _character_visual.has_method("apply_state"):
 		_character_visual.apply_state({
 			"time": _life_time,
+			"state": visual_state,
 			"walk_phase": _walk_phase,
 			"move_amount": stride_strength if walking else 0.0,
 			"airborne": airborne,
@@ -773,6 +910,8 @@ func _update_model(input_direction: Vector3) -> void:
 			"dead": is_dead,
 			"boost": is_cybernetic_active,
 			"damage_flash": _damage_flash_left,
+			"action_visual_token": _action_visual_token,
+			"action_duration": _current_visual_action_duration(),
 		})
 	_left_leg.rotation.x = stride
 	_right_leg.rotation.x = -stride
@@ -819,7 +958,9 @@ func _update_model(input_direction: Vector3) -> void:
 		_right_arm.rotation = Vector3(-2.6, 0.0, -0.2)
 		_left_arm.rotation.x = -1.8
 		_body_pivot.rotation.x = -0.12
-	_slash_root.visible = slash_time_left > 0.0
+	var uses_punch_motion := _active_attack_kind in ["punch", "slash", "dash_slash"]
+	var uses_sweep_motion := _active_attack_kind == "sweep"
+	_slash_root.visible = slash_time_left > 0.0 and not uses_punch_motion and not uses_sweep_motion
 	if slash_time_left > 0.0:
 		var progress := 1.0 - slash_time_left / _active_slash_duration
 		_slash_root.rotation.y = _direction_yaw(slash_direction) + lerpf(-0.15, 0.2, progress)
@@ -845,7 +986,7 @@ func _build_model() -> void:
 	collision.shape = shape
 	collision.position.y = 0.8
 	add_child(collision)
-	floor_snap_length = 0.2
+	floor_snap_length = maxf(0.2, max_step_height + 0.02)
 
 	_body_material = _make_material(Color("50d6c0"))
 	_implant_material = _make_material(Color("74c8bb"), true)

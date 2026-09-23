@@ -1,0 +1,146 @@
+{
+  "residential_0": {
+    "source": "居民楼.glb",
+    "sha256": "4bdeee45ea16723e980a2586426cc3e4984508b448d5c38d09be39bc80948fbe",
+    "source_triangles": 502772,
+    "collision_triangles": 60000,
+    "source_min": [
+      -5.069091796875,
+      0.0,
+      -3.82666015625
+    ],
+    "source_max": [
+      5.069091796875,
+      15.9990234375,
+      3.82666015625
+    ],
+    "sampled_error_p95_m": 0.0083,
+    "sampled_error_max_m": 0.1954
+  },
+  "residential_1": {
+    "source": "居民楼(1).glb",
+    "sha256": "27b3e798dd62dad5526100dfa676844d15f28bd604de4150c6e14af7dda9bb5c",
+    "source_triangles": 867639,
+    "collision_triangles": 13999,
+    "source_min": [
+      -0.3447723388671875,
+      0.0,
+      -0.383209228515625
+    ],
+    "source_max": [
+      0.3447723388671875,
+      0.9778748154640198,
+      0.383209228515625
+    ],
+    "sampled_error_p95_m": 0.0526,
+    "sampled_error_max_m": 0.1366
+  },
+  "residential_2": {
+    "source": "居民楼3.glb",
+    "sha256": "f355227af41f08b4f56f73628d0d961d9ac1aee93a1ab959910f5e2eb64f79fc",
+    "source_triangles": 115045,
+    "collision_triangles": 13999,
+    "source_min": [
+      -49.01795196533203,
+      0.0,
+      -31.627370834350586
+    ],
+    "source_max": [
+      49.01795196533203,
+      97.22389221191406,
+      31.627370834350586
+    ],
+    "sampled_error_p95_m": 0.0159,
+    "sampled_error_max_m": 0.0908
+  },
+  "residential_3": {
+    "source": "居民楼4.glb",
+    "sha256": "3406ff5b1552cb2fcecb3387cbb3b2b98596fc83a54fb0c437cb3820050fb736",
+    "source_triangles": 1766976,
+    "collision_triangles": 14000,
+    "source_min": [
+      -0.4542999267578125,
+      0.0,
+      -0.2319488525390625
+    ],
+    "source_max": [
+      0.4542999267578125,
+      0.9830322265625,
+      0.2319488525390625
+    ],
+    "sampled_error_p95_m": 0.0498,
+    "sampled_error_max_m": 0.1232
+  },
+  "residential_4": {
+    "source": "居民楼5.glb",
+    "sha256": "e6f1de8fbcd0b827bb4afc09325fa9ec7d1d7f4a8beacbfbc296f0eca0173f34",
+    "source_triangles": 900150,
+    "collision_triangles": 14000,
+    "source_min": [
+      -0.3619689643383026,
+      0.0,
+      -0.2951354384422302
+    ],
+    "source_max": [
+      0.3619689643383026,
+      0.97955322265625,
+      0.2951354384422302
+    ],
+    "sampled_error_p95_m": 0.0366,
+    "sampled_error_max_m": 0.1183
+  },
+  "factory_0": {
+    "source": "工厂1.glb",
+    "sha256": "f3ff141ccd4e2c5e93a2ae447ad557e991814b473dee19269e4a5185c001c66c",
+    "source_triangles": 117497,
+    "collision_triangles": 13999,
+    "source_min": [
+      -46.74140167236328,
+      0.0,
+      -36.663028717041016
+    ],
+    "source_max": [
+      46.74140167236328,
+      97.76960754394531,
+      36.663028717041016
+    ],
+    "sampled_error_p95_m": 0.0166,
+    "sampled_error_max_m": 0.0668
+  },
+  "factory_1": {
+    "source": "工业机房楼.glb",
+    "sha256": "454b21de14ca2b94e41ca8d987fe73358e98b6ffaf93f1e40ff8b30871602e3d",
+    "source_triangles": 121270,
+    "collision_triangles": 13999,
+    "source_min": [
+      -36.0966796875,
+      0.0,
+      -25.375783920288086
+    ],
+    "source_max": [
+      36.0966796875,
+      97.8212890625,
+      25.375783920288086
+    ],
+    "sampled_error_p95_m": 0.0237,
+    "sampled_error_max_m": 0.1567
+  },
+  "shop": {
+    "source": "商店.glb",
+    "sha256": "c45cc01c5cea878a0f6c02fc67c63aa4e6012ab49896ae5e77444e2eb04a73c5",
+    "source_triangles": 129604,
+    "collision_triangles": 14000,
+    "source_min": [
+      -48.97615432739258,
+      0.0,
+      -43.808921813964844
+    ],
+    "source_max": [
+      48.97615432739258,
+      83.80864715576172,
+      43.808921813964844
+    ],
+    "sampled_error_p95_m": 0.0215,
+    "sampled_error_max_m": 0.1283
+  }
+}

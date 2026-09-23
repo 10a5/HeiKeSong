@@ -143,7 +143,7 @@ func _test_card_combos() -> void:
 	_check(not player.take_damage(20.0) and _near(player.health, player.max_health), "Roll slash keeps roll invulnerability")
 	var energy_after_attack: float = player.energy
 	_check(not player.request_card("slash") and _near(player.energy, energy_after_attack), "Only one attack can be inserted in the same roll")
-	await _steps(24)
+	await _steps(30)
 	_check(not player.is_rolling and player.slash_time_left <= 0.0, "The concurrent combo expires without a delayed replay")
 	_check(_near(enemy.health, 75.0), "One roll slash damages the same target only once")
 
@@ -157,7 +157,7 @@ func _test_card_combos() -> void:
 	_check(player.is_rolling, "Slash-to-roll enters the roll immediately")
 	_check(_near(slash_energy_before - player.energy, player.slash_cost + player.roll_cost), "Slash-to-roll spends exactly both card costs")
 	_check(not player.take_damage(20.0) and _near(player.health, player.max_health), "Slash-to-roll still grants roll invulnerability")
-	await _steps(16)
+	await _steps(30)
 	_check(not player.is_rolling and player.slash_time_left <= 0.0, "Slash-to-roll does not leave a stale attack after the roll")
 	_check(slash_active_before_roll > 0.0, "The preceding slash had a real active window")
 
@@ -171,7 +171,7 @@ func _test_card_combos() -> void:
 	_check(_near(player.roll_time_left, roll_time_before_pause) and _near(player.slash_time_left, slash_time_before_pause), "Pause freezes both rolling and its concurrent slash")
 	_check(not player.request_card("slash"), "Pause rejects another combo card")
 	scene.toggle_pause()
-	await _steps(24)
+	await _steps(30)
 	_check(not player.is_rolling and player.slash_time_left <= 0.0, "A paused combo resumes once and then expires cleanly")
 	await _reset_pair(false, PLAYER_START, Vector3(0, 0, -2.5))
 	_check(player.request_card("roll") and player.request_card("slash"), "A concurrent combo can be cancelled by reset")

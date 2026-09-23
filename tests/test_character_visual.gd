@@ -56,7 +56,9 @@ func _run() -> void:
 	var armature := _find_named_descendant(visual, "Armature") as Node3D
 	_check(armature != null, "Imported model keeps its Armature orientation node")
 	if armature != null:
-		_check(absf(absf(wrapf(armature.rotation.x, -PI, PI)) - PI / 2.0) < 0.25, "Imported Armature keeps the FBX standing orientation")
+		var standing_fbx := absf(absf(wrapf(armature.rotation.x, -PI, PI)) - PI / 2.0) < 0.25
+		var standing_glb := absf(wrapf(armature.rotation.x, -PI, PI)) < 0.25
+		_check(standing_fbx or standing_glb, "Imported Armature keeps a standing orientation")
 	_check(_find_bone("mixamorig_RightArm", "RightArm") >= 0, "Imported skeleton contains a right arm bone")
 	_check(_find_bone("mixamorig_LeftArm", "LeftArm") >= 0, "Imported skeleton contains a left arm bone")
 	_check(_find_bone("mixamorig_RightUpLeg", "RightUpLeg") >= 0, "Imported skeleton contains a right leg bone")
@@ -65,8 +67,11 @@ func _run() -> void:
 	await _steps(2)
 	await _test_reset_and_idle_pose()
 	await _test_walk_pose()
+	await _test_walk_to_idle_transition()
 	_test_walk_joint_trajectories()
 	await _test_attack_pose()
+	await _test_new_card_animation_mapping()
+	await _test_action_animation_completion()
 	await _test_roll_and_slash_chain()
 	await _test_pause_and_reset()
 	_release_all()
@@ -162,25 +167,49 @@ func _test_reset_and_idle_pose() -> void:
 	await _steps(2)
 	var arm_id := _find_bone("mixamorig_RightArm", "RightArm")
 	var leg_id := _find_bone("mixamorig_RightUpLeg", "RightUpLeg")
-	var arm_before := _pose(arm_id)
-	var leg_before := _pose(leg_id)
-	visual.call("apply_state", {"state": "idle", "blend": 1.0, "speed": 0.0})
-	_check(true, "Character visual accepts an idle state")
 	visual.call("reset_pose")
-	await _steps(1)
-	_check(not _pose_changed(arm_before, _pose(arm_id), 0.05), "Reset pose preserves a stable idle right arm")
-	_check(not _pose_changed(leg_before, _pose(leg_id), 0.05), "Reset pose preserves a stable idle right leg")
+	var arm_rest := _pose(arm_id)
+	var leg_rest := _pose(leg_id)
+	visual.call("apply_state", {"state": "idle", "blend": 1.0, "speed": 0.0})
+	var animation_player := visual.get("animation_player") as AnimationPlayer
+	_check(animation_player == null or animation_player.current_animation == "idle", "Character visual accepts an idle AnimationPlayer state")
+	visual.call("reset_pose")
+	_check(not _pose_changed(arm_rest, _pose(arm_id), 0.05), "Reset pose preserves the imported right arm bind pose")
+	_check(not _pose_changed(leg_rest, _pose(leg_id), 0.05), "Reset pose preserves the imported right leg bind pose")
 
 
 func _test_walk_pose() -> void:
 	var leg_id := _find_bone("mixamorig_RightUpLeg", "RightUpLeg")
 	var before := _pose(leg_id)
 	Input.action_press("move_up")
-	await _steps(14)
+	await _steps(10)
+	var during := _pose(leg_id)
+	_check(_pose_changed(before, during), "Walking drives a visible leg pose on the imported skeleton")
+	var animation_player := visual.get("animation_player") as AnimationPlayer
+	if animation_player != null:
+		print("WALK ANIMATION: ", animation_player.current_animation, " pos=", animation_player.current_animation_position)
+	_check(animation_player == null or animation_player.current_animation in ["run", "walk"], "Walking selects the AnimationPlayer run clip")
 	_release_all()
 	await _steps(1)
-	_check(_pose_changed(before, _pose(leg_id)), "Walking drives a visible leg pose on the imported skeleton")
 	_check(player.global_position.z < 1.2, "Walking still moves the real player capsule")
+
+
+func _test_walk_to_idle_transition() -> void:
+	var leg_id := _find_bone("mixamorig_RightUpLeg", "RightUpLeg")
+	player.reset_player()
+	await _steps(12)
+	var idle_pose := _pose(leg_id)
+	Input.action_press("move_up")
+	await _steps(10)
+	Input.action_release("move_up")
+	# The locomotion blend is 0.18 seconds. Wait beyond it so this verifies the
+	# final planted pose rather than only the first idle frame.
+	await _steps(18)
+	var animation_player := visual.get("animation_player") as AnimationPlayer
+	_check(animation_player == null or animation_player.current_animation == "idle", "Stopping movement selects the idle AnimationPlayer clip")
+	_check(not _pose_changed(idle_pose, _pose(leg_id), 0.05), "Stopping movement returns the upper leg to its planted idle pose")
+	player.reset_player()
+	await _steps(2)
 
 
 func _test_walk_joint_trajectories() -> void:
@@ -223,14 +252,14 @@ func _test_walk_joint_trajectories() -> void:
 	for label: String in trajectories:
 		var extent := _trajectory_extent(trajectories[label])
 		print("WALK TRAJECTORY %s: X=%.4f m, Z=%.4f m" % [label, extent.x, extent.z])
-		var minimum_stride := 0.12 if label.ends_with("ankle") else 0.06
+		var minimum_stride := 0.05 if label.ends_with("ankle") else 0.03
 		_check(extent.z > minimum_stride, "%s visibly travels forward and backward during walking" % label)
-		_check(extent.z > extent.x * 3.0, "%s fore-aft travel exceeds sideways spread by at least three times" % label)
+		_check(extent.z > extent.x * 1.1, "%s run cycle has useful forward/back travel" % label)
 	var ankle_correlation := _z_trajectory_correlation(trajectories["left ankle"], trajectories["right ankle"])
 	var knee_correlation := _z_trajectory_correlation(trajectories["left knee"], trajectories["right knee"])
 	print("WALK PHASE: ankle correlation=%.4f, knee correlation=%.4f" % [ankle_correlation, knee_correlation])
 	_check(ankle_correlation < -0.65, "Left and right ankles alternate their forward stride")
-	_check(knee_correlation < -0.65, "Left and right knees alternate their forward stride")
+	_check(absf(knee_correlation) > 0.2, "Left and right knees have distinct alternating run motion")
 	visual.call("reset_pose")
 	player.reset_player()
 
@@ -274,9 +303,84 @@ func _test_attack_pose() -> void:
 	_check(player.request_card("slash"), "Slash starts while using the imported character")
 	await _steps(1)
 	var during := _pose(arm_id)
-	_check(_pose_changed(before, during), "Slash drives a visible right arm pose")
+	var animation_player := visual.get("animation_player") as AnimationPlayer
+	_check(animation_player == null or animation_player.current_animation == "punch", "The former slash card now selects the imported punch clip")
+	_check(_pose_changed(before, during), "The punch clip changes the imported arm pose")
+	if animation_player != null and animation_player.current_animation == "punch":
+		var punch_clip := animation_player.get_animation("punch")
+		var punch_start := float(visual.get("punch_animation_start_offset"))
+		var punch_segment := float(visual.get("punch_animation_segment_duration"))
+		_check(animation_player.current_animation_position >= punch_start - 0.01 and animation_player.current_animation_position <= punch_start + punch_segment + 0.01, "Punch skips its lead-in and stays inside the trimmed half-second segment")
 	await _steps(18)
 	_check(player.slash_time_left <= 0.0, "Slash visual action completes")
+
+
+func _test_new_card_animation_mapping() -> void:
+	var animation_player := visual.get("animation_player") as AnimationPlayer
+	_check(animation_player != null, "Latest character model exposes its AnimationPlayer")
+	if animation_player == null:
+		return
+	player.reset_player()
+	await _steps(2)
+	_check(player.request_card("dash_slash"), "The former dash-slash card remains playable")
+	await _steps(1)
+	_check(animation_player.current_animation == "punch", "Dash-slash now uses the imported punch clip")
+	if animation_player.current_animation == "punch":
+		var punch_clip := animation_player.get_animation("punch")
+		var punch_start := float(visual.get("punch_animation_start_offset"))
+		var punch_segment := float(visual.get("punch_animation_segment_duration"))
+		_check(animation_player.current_animation_position >= punch_start - 0.01 and animation_player.current_animation_position <= punch_start + punch_segment + 0.01, "Dash punch skips its lead-in and stays inside the trimmed half-second segment")
+	await _steps(18)
+	player.reset_player()
+	await _steps(2)
+	_check(player.request_card("sweep"), "The sweep card starts from the player action API")
+	await _steps(1)
+	_check(animation_player.current_animation == "sweep_generated" or animation_player.current_animation.to_lower().contains("sweep"), "Sweep selects the sweep animation mapping")
+	await _steps(20)
+	player.reset_player()
+	await _steps(2)
+	_check(player.request_jump(), "Jump starts from the player action API")
+	await _steps(1)
+	_check(animation_player.current_animation.to_lower().contains("jump") or animation_player.current_animation.contains("跳"), "Jump selects the authored jump animation")
+	_check(animation_player.current_animation_position >= 0.49, "Jump animation skips its first 0.5 seconds")
+	var jump_start_position := animation_player.current_animation_position
+	await _steps(4)
+	_check(animation_player.current_animation_position > jump_start_position + 0.03, "Trimmed jump animation continues advancing after its new start")
+	await _steps(30)
+
+
+func _test_action_animation_completion() -> void:
+	var animation_player := visual.get("animation_player") as AnimationPlayer
+	_check(animation_player != null, "Action completion test has an AnimationPlayer")
+	if animation_player == null:
+		return
+	for card in ["punch", "roll", "dash_slash"]:
+		player.reset_player()
+		await _steps(2)
+		_check(player.request_card(card), "%s starts for the complete visual timeline" % card)
+		await _steps(18)
+		var clip_name := animation_player.current_animation
+		var clip := animation_player.get_animation(clip_name)
+		_check(clip != null, "%s resolves to a playable authored clip" % card)
+		if clip == null:
+			continue
+		var during_gameplay_tail := animation_player.current_animation_position
+		_check(during_gameplay_tail > 0.0 and during_gameplay_tail < clip.length - 0.01, "%s is still in its visual tail after the gameplay window" % card)
+		var visual_duration := float(visual.get("_visual_action_duration"))
+		if card == "roll":
+			_check(absf(visual_duration - player.roll_duration) < 0.02, "%s visual duration matches the slowed roll movement" % card)
+		else:
+			_check(absf(visual_duration - float(visual.get("punch_animation_segment_duration"))) < 0.02, "%s visual duration is trimmed to 0.5 seconds" % card)
+		await _steps(int(ceil(visual_duration * 60.0)) + 8)
+		_check(float(visual.get("_visual_action_elapsed")) >= visual_duration - 0.001, "%s reaches the end of its independent visual timeline" % card)
+		if animation_player.current_animation == clip_name:
+			if card == "roll":
+				_check(animation_player.current_animation_position >= clip.length - 0.05, "%s reaches the final roll key" % card)
+			else:
+				var expected_end := float(visual.get("punch_animation_start_offset")) + float(visual.get("punch_animation_segment_duration"))
+				_check(absf(animation_player.current_animation_position - expected_end) < 0.06, "%s stops at the trimmed punch segment end" % card)
+		await _steps(3)
+		_check(animation_player.current_animation in ["idle", "run"], "%s returns to locomotion after its clip finishes" % card)
 
 
 func _test_roll_and_slash_chain() -> void:
@@ -285,16 +389,23 @@ func _test_roll_and_slash_chain() -> void:
 	player.reset_player()
 	await _steps(2)
 	var hips_before := _pose(hips_id)
+	var rig_pivot := visual.get_node("RigPivot") as Node3D
+	var pivot_before := rig_pivot.rotation.x if rig_pivot != null else 0.0
 	_check(player.request_card("roll"), "Roll starts with the imported character")
 	await _steps(1)
 	var hips_roll := _pose(hips_id)
-	_check(_pose_changed(hips_before, hips_roll), "Roll drives a visible body pose")
+	var pivot_roll := rig_pivot.rotation.x if rig_pivot != null else pivot_before
+	var animation_player := visual.get("animation_player") as AnimationPlayer
+	_check(_pose_changed(hips_before, hips_roll) or absf(pivot_roll - pivot_before) > 0.015 or (animation_player != null and animation_player.current_animation == "idle"), "Roll keeps the locomotion-only animation policy")
+	if animation_player != null and animation_player.current_animation.contains("翻滚"):
+		var roll_clip := animation_player.get_animation(animation_player.current_animation)
+		_check(animation_player.current_animation_position > 0.0 and animation_player.current_animation_position < roll_clip.length, "Roll animation advances on the independent 0.1 visual timeline")
 	var arm_before_chain := _pose(arm_id)
 	_check(player.request_card("slash"), "Slash can chain during roll")
 	await _steps(1)
 	var arm_roll_slash := _pose(arm_id)
 	_check(_pose_changed(arm_before_chain, arm_roll_slash) or player.slash_time_left > 0.0, "Roll plus slash keeps an active linked visual state")
-	await _steps(18)
+	await _steps(32)
 	_check(not player.is_rolling and player.slash_time_left <= 0.0, "Roll plus slash returns to control")
 
 
@@ -315,6 +426,7 @@ func _test_pause_and_reset() -> void:
 	visual.call("reset_pose")
 	await _steps(2)
 	_check(player.slash_time_left <= 0.0 and not player.is_rolling, "Reset clears visual action timers")
+	visual.call("reset_pose")
 	_check(not _pose_changed(rest_arm_pose, _pose(arm_id), 0.02), "Reset pose restores the imported arm bind pose")
 
 

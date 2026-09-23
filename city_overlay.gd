@@ -111,7 +111,7 @@ func _draw() -> void:
 	_text(Vector2(584, 105), "信用 %d" % credits, 16, TEAL)
 	_text(Vector2(584, 132), "已清理遭遇 %d/%d" % [cleared, total], 12, TEXT)
 	var index := 0
-	for kind in ["residential", "shop", "office", "medical", "police"]:
+	for kind in ["residential", "shop", "factory", "medical", "police"]:
 		var y := 166.0 + index * 27.0
 		draw_rect(Rect2(585, y - 10, 11, 11), SERVICE.COLORS[kind])
 		_text(Vector2(605, y), SERVICE.NAMES[kind], 12, TEXT)
@@ -145,7 +145,8 @@ func _draw_city(rect: Rect2, expanded: bool) -> void:
 	for building: Dictionary in buildings:
 		var at: Vector3 = building.get("position", Vector3.ZERO)
 		var width := float(building.get("width", fallback_width))
-		var block := Rect2(Vector2(at.x, at.z) - Vector2.ONE * width * 0.5, Vector2.ONE * width)
+		var depth := float(building.get("depth", width))
+		var block := Rect2(Vector2(at.x - width * 0.5, at.z - depth * 0.5), Vector2(width, depth))
 		var kind := str(building.get("kind", "residential"))
 		var color: Color = SERVICE.COLORS.get(kind, MUTED)
 		draw_rect(_world_rect(block, rect, bounds), color.darkened(0.15))

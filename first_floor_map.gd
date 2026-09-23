@@ -2,37 +2,62 @@ extends Node3D
 ## Deterministic first-floor greybox. Streets stay open; only land and the
 ## surrounding one-block shelf have collision floors.
 
-const GRID_SIZE := 5
+const GRID_COLUMNS := 5
+const GRID_ROWS := 4
 const TILE_SIZE := 2.0
-const CELL_SIZE := 12.0 * TILE_SIZE
+const CELL_WIDTH := 11.0 * TILE_SIZE
+const CELL_DEPTH := 9.0 * TILE_SIZE
 const STREET_WIDTH := 4.0 * TILE_SIZE
-const BUILDING_WIDTH := 8.0 * TILE_SIZE
+const BUILDING_WIDTH := 7.0 * TILE_SIZE
+const BUILDING_DEPTH := 5.0 * TILE_SIZE
 const RESIDENTIAL_FLOOR_HEIGHT := 3.0
 const RESIDENTIAL_FLOORS := 5
 const RESIDENTIAL_TARGET_HEIGHT := RESIDENTIAL_FLOOR_HEIGHT * RESIDENTIAL_FLOORS
-const SHALLOW_WIDTH := CELL_SIZE
+const SHALLOW_MARGIN_X := CELL_WIDTH
+const SHALLOW_MARGIN_Z := CELL_DEPTH
 const DEEP_WIDTH := 100.0
 const WATER_HEIGHT := -0.12
-const HALF_GRID_SPAN := float(GRID_SIZE) * CELL_SIZE * 0.5
-const LAND_HALF_EXTENT := HALF_GRID_SPAN + STREET_WIDTH * 0.5
-const STREET_COORDINATES: Array[float] = [-60.0, -36.0, -12.0, 12.0, 36.0, 60.0]
+const HALF_GRID_SPAN_X := float(GRID_COLUMNS) * CELL_WIDTH * 0.5
+const HALF_GRID_SPAN_Z := float(GRID_ROWS) * CELL_DEPTH * 0.5
+const LAND_HALF_EXTENT_X := HALF_GRID_SPAN_X + STREET_WIDTH * 0.5
+const LAND_HALF_EXTENT_Z := HALF_GRID_SPAN_Z + STREET_WIDTH * 0.5
+const STREET_X: Array[float] = [-55.0, -33.0, -11.0, 11.0, 33.0, 55.0]
+const STREET_Z: Array[float] = [-36.0, -18.0, 0.0, 18.0, 36.0]
 const KIND_COLORS := {
 	"residential": Color("a4afb7"),
 	"shop": Color("e9b866"),
-	"office": Color("749cac"),
+	"factory": Color("749cac"),
 	"medical": Color("85c3ab"),
 	"police": Color("879dc6"),
 }
 const KIND_NAMES := {
-	"residential": "住宅", "shop": "商店", "office": "写字楼",
+	"residential": "住宅", "shop": "商店", "factory": "工厂",
 	"medical": "医疗", "police": "公安",
 }
 const KIND_ACCENTS := {
 	"residential": Color("728795"), "shop": Color("ffbd72"),
-	"office": Color("bba2ef"), "medical": Color("74edba"), "police": Color("79baff"),
+	"factory": Color("bba2ef"), "medical": Color("74edba"), "police": Color("79baff"),
 }
 const LABEL_FONT = preload("res://assets/fonts/NotoSansSC-Regular.ttf")
-const RESIDENTIAL_MODEL = preload("res://model/居民楼.glb")
+const RESIDENTIAL_MODELS: Array[PackedScene] = [
+	preload("res://model/居民楼.glb"), preload("res://model/居民楼(1).glb"),
+	preload("res://model/居民楼3.glb"), preload("res://model/居民楼4.glb"),
+	preload("res://model/居民楼5.glb"),
+]
+const FACTORY_MODELS: Array[PackedScene] = [preload("res://model/工厂1.glb"), preload("res://model/工业机房楼.glb")]
+const SHOP_MODEL = preload("res://model/商店.glb")
+const RESIDENTIAL_COLLISIONS: Array[Shape3D] = [
+	preload("res://assets/collisions/buildings/residential_0.res"),
+	preload("res://assets/collisions/buildings/residential_1.res"),
+	preload("res://assets/collisions/buildings/residential_2.res"),
+	preload("res://assets/collisions/buildings/residential_3.res"),
+	preload("res://assets/collisions/buildings/residential_4.res"),
+]
+const FACTORY_COLLISIONS: Array[Shape3D] = [
+	preload("res://assets/collisions/buildings/factory_0.res"),
+	preload("res://assets/collisions/buildings/factory_1.res"),
+]
+const SHOP_COLLISION = preload("res://assets/collisions/buildings/shop.res")
 const WET_STREET_SHADER = preload("res://materials/wet_street.gdshader")
 const RESIDENTIAL_SHADER = preload("res://materials/weathered_residential.gdshader")
 const WATER_SHADER = preload("res://materials/water_surface.gdshader")
@@ -40,14 +65,18 @@ const OCCLUSION_SHADER = preload("res://materials/occlusion_tech.gdshader")
 const WATER_EFFECTS = preload("res://water_effects.gd")
 const OCCLUSION_TRANSPARENCY := 0.68
 const OCCLUSION_FADE_SPEED := 5.5
+const CAMERA_OCCLUSION_MASK := 1 << 3
+const OCCLUSION_REQUIRED_SAMPLES := 5
 
 var seed_value: int = 104729
-var land_rect := Rect2(-LAND_HALF_EXTENT, -LAND_HALF_EXTENT, LAND_HALF_EXTENT * 2.0, LAND_HALF_EXTENT * 2.0)
-var shallow_rect := land_rect.grow(SHALLOW_WIDTH)
+var land_rect := Rect2(-LAND_HALF_EXTENT_X, -LAND_HALF_EXTENT_Z, LAND_HALF_EXTENT_X * 2.0, LAND_HALF_EXTENT_Z * 2.0)
+var shallow_rect := Rect2(land_rect.position - Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z), land_rect.size + Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z) * 2.0)
 var world_rect := shallow_rect.grow(DEEP_WIDTH)
-var spawn_position := Vector3(-CELL_SIZE * 0.5, 0.0, HALF_GRID_SPAN)
+var spawn_position := Vector3(-CELL_WIDTH * 0.5, 0.0, HALF_GRID_SPAN_Z)
 var road_width: float = STREET_WIDTH
-var block_size: float = CELL_SIZE
+var block_size: float = CELL_WIDTH
+var block_size_x: float = CELL_WIDTH
+var block_size_z: float = CELL_DEPTH
 var building_data: Array[Dictionary] = []
 var encounters_data: Array[Dictionary] = []
 var water_rects: Array[Rect2] = []
@@ -57,6 +86,7 @@ var _building_visuals: Dictionary = {}
 var _materials: Dictionary = {}
 var _occluded_ids: Array[int] = []
 var _residential_bounds := AABB()
+var _model_bounds: Dictionary = {}
 
 
 func _ready() -> void:
@@ -80,8 +110,8 @@ func generate(new_seed_value: int = 104729) -> void:
 	_building_visuals.clear()
 	_occluded_ids.clear()
 	_materials.clear()
-	land_rect = Rect2(-LAND_HALF_EXTENT, -LAND_HALF_EXTENT, LAND_HALF_EXTENT * 2.0, LAND_HALF_EXTENT * 2.0)
-	shallow_rect = land_rect.grow(SHALLOW_WIDTH)
+	land_rect = Rect2(-LAND_HALF_EXTENT_X, -LAND_HALF_EXTENT_Z, LAND_HALF_EXTENT_X * 2.0, LAND_HALF_EXTENT_Z * 2.0)
+	shallow_rect = Rect2(land_rect.position - Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z), land_rect.size + Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z) * 2.0)
 	world_rect = shallow_rect.grow(DEEP_WIDTH)
 	water_rects = _rect_bands(land_rect, shallow_rect)
 	_generated = Node3D.new()
@@ -90,7 +120,7 @@ func generate(new_seed_value: int = 104729) -> void:
 	_create_materials()
 	_create_ground()
 	_create_streets()
-	_prepare_residential_model()
+	_prepare_building_models()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	_create_building_data(rng)
@@ -116,29 +146,38 @@ func get_water_zone(pos: Vector3) -> String:
 func update_occlusion(camera: Camera3D, actor: Node3D) -> void:
 	if not is_instance_valid(camera) or not is_instance_valid(actor) or not is_inside_tree():
 		return
-	# Ray-query actual collision geometry. Exclude each hit building and keep
-	# tracing so two overlapping blocks can never conceal the actor together.
+	# A single ray grazing a ledge or passing above a shoulder used to fade
+	# the whole building. Require coverage of the torso's projected area, and
+	# query only visible upper surfaces (never the wider walkable plinth).
 	var next_ids: Array[int] = []
-	var exclusions: Array[RID] = []
-	if actor is CollisionObject3D:
-		exclusions.append(actor.get_rid())
-	var origin := camera.global_position
-	for offset in [Vector3.UP * 0.85, Vector3.UP * 1.5]:
-		var target: Vector3 = actor.global_position + offset
-		for _iteration in range(GRID_SIZE * GRID_SIZE):
-			var query := PhysicsRayQueryParameters3D.create(origin, target, 1)
-			query.exclude = exclusions
-			query.hit_from_inside = true
-			var hit := get_world_3d().direct_space_state.intersect_ray(query)
-			if hit.is_empty():
-				break
-			var body: Object = hit["collider"]
-			if not is_instance_valid(body) or not body.has_meta("city_building_id"):
-				break
-			var building_id := int(body.get_meta("city_building_id"))
-			if building_id not in next_ids:
-				next_ids.append(building_id)
-			exclusions.append(body.get_rid())
+	var coverage: Dictionary = {}
+	var camera_right := camera.global_basis.x.normalized()
+	for height in [0.75, 1.10, 1.45]:
+		for side in [-0.18, 0.0, 0.18]:
+			var target: Vector3 = actor.global_position + Vector3.UP * height + camera_right * side
+			if camera.is_position_behind(target):
+				continue
+			# Begin at the rendered near plane: geometry behind the camera or
+			# clipped out of its image must not trigger a hologram.
+			var screen_point := camera.unproject_position(target)
+			var origin := camera.project_position(screen_point, camera.near)
+			var exclusions: Array[RID] = []
+			for _iteration in range(GRID_COLUMNS * GRID_ROWS):
+				var query := PhysicsRayQueryParameters3D.create(origin, target, CAMERA_OCCLUSION_MASK)
+				query.exclude = exclusions
+				query.hit_from_inside = true
+				var hit := get_world_3d().direct_space_state.intersect_ray(query)
+				if hit.is_empty():
+					break
+				var body: Object = hit["collider"]
+				if not is_instance_valid(body) or not body.has_meta("city_building_id"):
+					break
+				var building_id := int(body.get_meta("city_building_id"))
+				coverage[building_id] = int(coverage.get(building_id, 0)) + 1
+				exclusions.append(body.get_rid())
+	for building_id: int in coverage:
+		if int(coverage[building_id]) >= OCCLUSION_REQUIRED_SAMPLES:
+			next_ids.append(building_id)
 	for building_id in _occluded_ids:
 		if building_id not in next_ids:
 			_set_building_occluded(building_id, false)
@@ -153,8 +192,7 @@ func _set_building_occluded(building_id: int, obscured: bool) -> void:
 		return
 	var visuals: Dictionary = _building_visuals[building_id]
 	# Keep the full facade in the scene, but make the sight-blocking geometry
-	# fade into a holographic material. The full-size solid collision body is
-	# deliberately untouched.
+	# fade into a holographic material. Walking collision is untouched.
 	var upper: Node3D = visuals["upper"]
 	upper.visible = true
 	if not visuals.has("occlusion_records"):
@@ -276,68 +314,85 @@ func _create_ground() -> void:
 	_generated.add_child(water_effects)
 	# CharacterBody3D does not auto-step over the 0.45 m quay. Short ramps at
 	# every street end let ordinary walking return from the shallow shelf.
-	for line in STREET_COORDINATES:
+	for line in STREET_X:
 		_create_shore_ramp(Vector3(line, 0.0, land_rect.end.y), 0.0)
 		_create_shore_ramp(Vector3(line, 0.0, land_rect.position.y), PI)
+	for line in STREET_Z:
 		_create_shore_ramp(Vector3(land_rect.end.x, 0.0, line), PI * 0.5)
 		_create_shore_ramp(Vector3(land_rect.position.x, 0.0, line), -PI * 0.5)
 	# Non-solid short edge dashes distinguish the shelf without building a wall.
 	for index in range(22):
-		var along := -LAND_HALF_EXTENT + 2.0 + float(index) * 6.0
+		var along_x := land_rect.position.x + 2.0 + float(index) * 6.0
+		var along_z := land_rect.position.y + 2.0 + float(index) * 6.0
 		for sign_value in [-1.0, 1.0]:
-			_box(_generated, "ShoreEdge", Vector3(2.5, 0.015, 0.20), Vector3(along, 0.011, sign_value * (LAND_HALF_EXTENT - 0.13)), _materials["shore"])
-			_box(_generated, "ShoreEdge", Vector3(0.20, 0.015, 2.5), Vector3(sign_value * (LAND_HALF_EXTENT - 0.13), 0.011, along), _materials["shore"])
+			if along_x <= land_rect.end.x - 1.0:
+				_box(_generated, "ShoreEdge", Vector3(2.5, 0.015, 0.20), Vector3(along_x, 0.011, sign_value * (LAND_HALF_EXTENT_Z - 0.13)), _materials["shore"])
+			if along_z <= land_rect.end.y - 1.0:
+				_box(_generated, "ShoreEdge", Vector3(0.20, 0.015, 2.5), Vector3(sign_value * (LAND_HALF_EXTENT_X - 0.13), 0.011, along_z), _materials["shore"])
 
 
 func _create_streets() -> void:
 	# Shared continuous land collision avoids street seams or curb steps.
-	for line in STREET_COORDINATES:
-		for cell in range(GRID_SIZE):
-			var center := -HALF_GRID_SPAN + CELL_SIZE * 0.5 + float(cell) * CELL_SIZE
-			for delta in [-7.0, 0.0, 7.0]:
+	for line in STREET_X:
+		for cell in range(GRID_ROWS):
+			var center := -HALF_GRID_SPAN_Z + CELL_DEPTH * 0.5 + float(cell) * CELL_DEPTH
+			for delta in [-5.0, 0.0, 5.0]:
 				_box(_generated, "RoadDash", Vector3(0.15, 0.014, 2.5), Vector3(line, 0.012, center + delta), _materials["line"])
+	for line in STREET_Z:
+		for cell in range(GRID_COLUMNS):
+			var center := -HALF_GRID_SPAN_X + CELL_WIDTH * 0.5 + float(cell) * CELL_WIDTH
+			for delta in [-7.0, 0.0, 7.0]:
 				_box(_generated, "RoadDash", Vector3(2.5, 0.014, 0.15), Vector3(center + delta, 0.012, line), _materials["line"])
 	# Crosswalks stop outside junction centers; they also show the grid clearly.
-	for x in STREET_COORDINATES:
-		for z in STREET_COORDINATES:
+	for x in STREET_X:
+		for z in STREET_Z:
+			var crossing_z := z - (STREET_WIDTH * 0.5 - 1.0) if z == STREET_Z[-1] else z + (STREET_WIDTH * 0.5 - 1.0)
+			var crossing_x := x - (STREET_WIDTH * 0.5 - 1.0) if x == STREET_X[-1] else x + (STREET_WIDTH * 0.5 - 1.0)
 			for stripe in range(4):
 				var across := -2.7 + float(stripe) * 1.8
-				var crossing_z := z - 4.9 if z == HALF_GRID_SPAN else z + 4.9
 				_box(_generated, "Crosswalk", Vector3(0.84, 0.015, 1.5), Vector3(x + across, 0.015, crossing_z), _materials["curb"])
+				_box(_generated, "Crosswalk", Vector3(1.5, 0.015, 0.84), Vector3(crossing_x, 0.015, z + across), _materials["curb"])
 
 
 func _create_building_data(rng: RandomNumberGenerator) -> void:
 	var available_kinds: Array[String] = []
-	for _index in range(15):
+	for _index in range(12):
 		available_kinds.append("residential")
-	available_kinds.append_array(["shop", "shop", "office", "office", "office", "medical", "police", "police"])
+	# Two southern corner cells are reserved below for a shop and medical
+	# centre, leaving this list at exactly the remaining 18 cells.
+	available_kinds.append_array(["shop", "shop", "factory", "factory", "factory", "police"])
 	_shuffle(available_kinds, rng)
 	var nearby_cells: Array[int] = [0, 1, 2]
 	_shuffle(nearby_cells, rng)
 	var nearby_kinds: Array[String] = ["shop", "medical"]
 	_shuffle(nearby_kinds, rng)
-	for row in range(GRID_SIZE):
-		for column in range(GRID_SIZE):
+	for row in range(GRID_ROWS):
+		for column in range(GRID_COLUMNS):
 			var kind: String
 			# The initial corner of the island always offers two useful doors.
-			if row == GRID_SIZE - 1 and column == nearby_cells[0]:
+			if row == GRID_ROWS - 1 and column == nearby_cells[0]:
 				kind = nearby_kinds[0]
-			elif row == GRID_SIZE - 1 and column == nearby_cells[1]:
+			elif row == GRID_ROWS - 1 and column == nearby_cells[1]:
 				kind = nearby_kinds[1]
 			else:
 				kind = available_kinds.pop_back()
-			var center := Vector3(-HALF_GRID_SPAN + CELL_SIZE * 0.5 + column * CELL_SIZE, 0.0, -HALF_GRID_SPAN + CELL_SIZE * 0.5 + row * CELL_SIZE)
-			var height := rng.randf_range(6.5, 10.0) if kind == "residential" else rng.randf_range(6.0, 8.0)
+			var center := Vector3(-HALF_GRID_SPAN_X + CELL_WIDTH * 0.5 + column * CELL_WIDTH, 0.0, -HALF_GRID_SPAN_Z + CELL_DEPTH * 0.5 + row * CELL_DEPTH)
+			var height := rng.randf_range(6.5, 10.0) if kind == "residential" else rng.randf_range(7.0, 10.0)
+			var model_index := -1
 			if kind == "residential":
-				# Keep the eight-tile parcel while using the shared 3m-per-floor scale.
-				height = _residential_bounds.size.y * _residential_scale().y + 0.22
+				model_index = rng.randi_range(0, RESIDENTIAL_MODELS.size() - 1)
+				height = RESIDENTIAL_TARGET_HEIGHT + 0.22
+			elif kind == "factory":
+				model_index = rng.randi_range(0, FACTORY_MODELS.size() - 1)
 			building_data.append({
-				"id": row * GRID_SIZE + column,
+				"id": row * GRID_COLUMNS + column,
 				"cell": Vector2i(column, row), "kind": kind,
 				"position": center,
-				"door_position": center + Vector3(0.0, 0.0, 10.3),
+				"door_position": center + Vector3(0.0, 0.0, BUILDING_DEPTH * 0.5 + STREET_WIDTH * 0.30),
 				"height": height,
 				"width": BUILDING_WIDTH,
+				"depth": BUILDING_DEPTH,
+				"model_index": model_index,
 			})
 
 
@@ -349,56 +404,68 @@ func _create_building(data: Dictionary) -> void:
 	var kind: String = data["kind"]
 	var height: float = data["height"]
 	var body_material: StandardMaterial3D = _materials[kind]
-	_box(building, "Sidewalk", Vector3(18.6, 0.018, 18.6), Vector3(0.0, 0.009, 0.0), _materials["pavement"])
-	_box(building, "LowFootprint", Vector3(BUILDING_WIDTH, 0.22, BUILDING_WIDTH), Vector3(0.0, 0.11, 0.0), _materials["roof"])
+	_box(building, "Sidewalk", Vector3(BUILDING_WIDTH + 0.9, 0.018, BUILDING_DEPTH + 0.9), Vector3(0.0, 0.009, 0.0), _materials["pavement"])
+	_box(building, "LowFootprint", Vector3(BUILDING_WIDTH, 0.22, BUILDING_DEPTH), Vector3(0.0, 0.11, 0.0), _materials["roof"])
 	var upper := Node3D.new()
 	upper.name = "OccludableUpper"
 	building.add_child(upper)
-	var collision := StaticBody3D.new()
-	collision.name = "BuildingCollision"
-	collision.collision_layer = 1
-	collision.collision_mask = 0
-	collision.set_meta("city_building_id", int(data["id"]))
-	var shape := CollisionShape3D.new()
-	var box_shape := BoxShape3D.new()
-	var collision_height := height if kind == "residential" else height + 0.16
-	box_shape.size = Vector3(BUILDING_WIDTH, collision_height, BUILDING_WIDTH)
-	shape.shape = box_shape
-	shape.position.y = collision_height * 0.5
-	collision.add_child(shape)
-	building.add_child(collision)
-	var outline := _box(building, "OcclusionFootprint", Vector3(BUILDING_WIDTH + 0.04, 0.016, BUILDING_WIDTH + 0.04), Vector3(0, 0.235, 0), _materials[kind + "_sign"])
+	var outline := _box(building, "OcclusionFootprint", Vector3(BUILDING_WIDTH + 0.04, 0.016, BUILDING_DEPTH + 0.04), Vector3(0, 0.235, 0), _materials[kind + "_sign"])
 	outline.visible = false
 	_building_visuals[int(data["id"])] = {"upper": upper, "outline": outline}
+	var model_fit: Node3D = null
+	var model_collision: Shape3D = null
 	if kind == "residential":
-		_add_residential_model(upper)
-		return
-	# Other building categories keep their existing greybox facades.
-	upper.scale = Vector3(BUILDING_WIDTH / 7.4, 1.0, BUILDING_WIDTH / 7.4)
-	_box(upper, "Facade", Vector3(7.4, height - 0.22, 7.4), Vector3(0.0, (height + 0.22) * 0.5, 0.0), body_material)
-	_box(upper, "Roof", Vector3(7.62, 0.16, 7.62), Vector3(0.0, height + 0.08, 0.0), _materials["roof"])
-	_box(upper, "Door", Vector3(1.15, 1.85, 0.045), Vector3(0.0, 0.925, 3.725), _materials["door"])
-	_box(upper, "DoorLight", Vector3(1.35, 0.10, 0.08), Vector3(0.0, 1.94, 3.77), _materials[kind + "_sign"])
-	var floors := 3 if height >= 8.5 else 2
-	for level in range(floors):
-		var window_y := 2.85 + level * 1.85
-		for offset_x in [-2.35, 0.0, 2.35]:
-			_box(upper, "Window", Vector3(1.22, 0.70, 0.04), Vector3(offset_x, window_y, 3.725), _materials["glass"])
-			_box(upper, "Window", Vector3(1.22, 0.70, 0.04), Vector3(offset_x, window_y, -3.725), _materials["glass"])
-		for offset_z in [-2.35, 0.0, 2.35]:
-			_box(upper, "Window", Vector3(0.04, 0.70, 1.22), Vector3(3.725, window_y, offset_z), _materials["glass"])
-			_box(upper, "Window", Vector3(0.04, 0.70, 1.22), Vector3(-3.725, window_y, offset_z), _materials["glass"])
-	_create_building_identity(upper, kind, height)
-	# Unobstructed walking strip to the southern road; no door collision.
-	_box(building, "DoorPath", Vector3(2.2, 0.015, 2.3), Vector3(0.0, 0.022, 9.15), _materials["curb"])
+		model_fit = _add_building_model(upper, RESIDENTIAL_MODELS[int(data.get("model_index", 0))], _model_bounds["residential_%d" % int(data.get("model_index", 0))], height)
+		model_collision = RESIDENTIAL_COLLISIONS[int(data.get("model_index", 0))]
+	elif kind == "shop":
+		model_fit = _add_building_model(upper, SHOP_MODEL, _model_bounds["shop"], height)
+		model_collision = SHOP_COLLISION
+	elif kind == "factory":
+		var factory_index := int(data.get("model_index", 0))
+		model_fit = _add_building_model(upper, FACTORY_MODELS[factory_index], _model_bounds["factory_%d" % factory_index], height)
+		model_collision = FACTORY_COLLISIONS[factory_index]
+	else:
+		# Medical and police keep compact greybox facades until their new meshes are supplied.
+		upper.scale = Vector3(BUILDING_WIDTH / 7.4, 1.0, BUILDING_DEPTH / 7.4)
+		_box(upper, "Facade", Vector3(7.4, height - 0.22, 7.4), Vector3(0.0, (height + 0.22) * 0.5, 0.0), body_material)
+		_box(upper, "Roof", Vector3(7.62, 0.16, 7.62), Vector3(0.0, height + 0.08, 0.0), _materials["roof"])
+		_box(upper, "Door", Vector3(1.15, 1.85, 0.045), Vector3(0.0, 0.925, 3.725), _materials["door"])
+		_box(upper, "DoorLight", Vector3(1.35, 0.10, 0.08), Vector3(0.0, 1.94, 3.77), _materials[kind + "_sign"])
+		var floors := 3 if height >= 8.5 else 2
+		for level in range(floors):
+			var window_y := 2.85 + level * 1.85
+			for offset_x in [-2.35, 0.0, 2.35]:
+				_box(upper, "Window", Vector3(1.22, 0.70, 0.04), Vector3(offset_x, window_y, 3.725), _materials["glass"])
+				_box(upper, "Window", Vector3(1.22, 0.70, 0.04), Vector3(offset_x, window_y, -3.725), _materials["glass"])
+			for offset_z in [-2.35, 0.0, 2.35]:
+				_box(upper, "Window", Vector3(0.04, 0.70, 1.22), Vector3(3.725, window_y, offset_z), _materials["glass"])
+				_box(upper, "Window", Vector3(0.04, 0.70, 1.22), Vector3(-3.725, window_y, offset_z), _materials["glass"])
+		_create_building_identity(upper, kind, height, 7.4, 7.4)
+	if model_fit != null:
+		_create_model_collision(building, model_fit, int(data["id"]), model_collision)
+		var visible_size: Vector3 = model_fit.get_meta("visible_size")
+		_create_building_identity(upper, kind, float(model_fit.get_meta("visible_height")), visible_size.x, visible_size.z)
+	else:
+		_create_box_collision(building, int(data["id"]), height + 0.16)
+	# The highlighted strip is a visual guide only; it has no collision.
+	_box(building, "DoorPath", Vector3(2.2, 0.015, 1.8), Vector3(0.0, 0.022, BUILDING_DEPTH * 0.5 + 0.8), _materials["curb"])
 
 
-func _prepare_residential_model() -> void:
-	if not _residential_bounds.size.is_zero_approx():
-		return
-	var sample := RESIDENTIAL_MODEL.instantiate()
-	_residential_bounds = _measure_model_bounds(sample)
+func _prepare_building_models() -> void:
+	_model_bounds.clear()
+	for index in range(RESIDENTIAL_MODELS.size()):
+		_model_bounds["residential_%d" % index] = _measure_packed_scene_bounds(RESIDENTIAL_MODELS[index])
+	for index in range(FACTORY_MODELS.size()):
+		_model_bounds["factory_%d" % index] = _measure_packed_scene_bounds(FACTORY_MODELS[index])
+	_model_bounds["shop"] = _measure_packed_scene_bounds(SHOP_MODEL)
+	_residential_bounds = _model_bounds["residential_0"]
+
+
+func _measure_packed_scene_bounds(scene: PackedScene) -> AABB:
+	var sample := scene.instantiate()
+	var bounds := _measure_model_bounds(sample)
 	sample.free()
+	return bounds
 
 
 func _measure_model_bounds(node: Node, parent_transform := Transform3D.IDENTITY) -> AABB:
@@ -413,42 +480,107 @@ func _measure_model_bounds(node: Node, parent_transform := Transform3D.IDENTITY)
 	return bounds
 
 
-func _residential_scale() -> Vector3:
-	var scale_x := BUILDING_WIDTH / maxf(_residential_bounds.size.x, 0.001)
-	var scale_z := BUILDING_WIDTH / maxf(_residential_bounds.size.z, 0.001)
-	# Fit the footprint independently, then calibrate vertical scale to the
-	# same three-metre storey used by the player and the rest of the district.
-	var scale_y := RESIDENTIAL_TARGET_HEIGHT / maxf(_residential_bounds.size.y, 0.001)
-	return Vector3(scale_x, scale_y, scale_z)
-
-
-func _add_residential_model(parent: Node3D) -> void:
+func _add_building_model(parent: Node3D, scene: PackedScene, bounds: AABB, target_height: float) -> Node3D:
 	var fit := Node3D.new()
-	fit.name = "ResidentialModelFit"
-	fit.scale = _residential_scale()
-	var center := _residential_bounds.get_center()
-	fit.position = Vector3(-center.x * fit.scale.x, 0.22 - _residential_bounds.position.y * fit.scale.y, -center.z * fit.scale.z)
+	fit.name = "BuildingModelFit"
+	# Put the long side along the rectangular parcel's long axis, including
+	# variants whose source model faces across Z. Collision uses this same basis.
+	var orientation := Basis(Vector3.UP, PI * 0.5) if bounds.size.z > bounds.size.x else Basis.IDENTITY
+	var oriented_bounds := Transform3D(orientation, Vector3.ZERO) * bounds
+	# Keep each imported facade's aspect ratio. The height establishes the
+	# visual scale, then a footprint cap prevents unusual source-unit assets
+	# from spilling into the eight-metre street.
+	var uniform_scale := target_height / maxf(oriented_bounds.size.y, 0.001)
+	var footprint_scale := minf((BUILDING_WIDTH - 0.55) / maxf(oriented_bounds.size.x, 0.001), (BUILDING_DEPTH - 0.55) / maxf(oriented_bounds.size.z, 0.001))
+	uniform_scale = minf(uniform_scale, footprint_scale)
+	fit.scale = Vector3.ONE * uniform_scale
+	fit.position = Vector3(-oriented_bounds.get_center().x * uniform_scale, 0.22 - oriented_bounds.position.y * uniform_scale, -oriented_bounds.get_center().z * uniform_scale)
+	fit.set_meta("collision_orientation", orientation)
+	fit.set_meta("visible_height", fit.position.y + oriented_bounds.end.y * uniform_scale)
+	fit.set_meta("visible_size", oriented_bounds.size * uniform_scale)
 	parent.add_child(fit)
-	# PackedScene instances share the original mesh and vertex-color materials.
-	var model := RESIDENTIAL_MODEL.instantiate()
-	model.name = "ResidentialModel"
-	fit.add_child(model)
+	# Preserve every GLB surface material. Occlusion is applied through
+	# material_override, so imported colours and textures return intact after fade.
+	var model := scene.instantiate()
+	model.name = "BuildingModel"
+	var oriented := Node3D.new()
+	oriented.name = "ModelOrientation"
+	oriented.basis = orientation
+	fit.add_child(oriented)
+	oriented.add_child(model)
 	for mesh: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
 		# Godot's imported mesh LODs reduce the cost of the fifteen tall towers.
 		mesh.lod_bias = 0.4
-		if mesh.mesh.get_surface_count() > 0:
-			mesh.set_surface_override_material(0, _materials["residential_weather"])
-		if mesh.mesh.get_surface_count() > 2:
-			mesh.set_surface_override_material(1, _materials["window_bright"])
-			mesh.set_surface_override_material(2, _materials["window_dim"])
+	return fit
 
 
-func _create_building_identity(upper: Node3D, kind: String, height: float) -> void:
+func _create_box_collision(parent: Node3D, building_id: int, collision_height: float) -> void:
+	var collision := StaticBody3D.new()
+	collision.name = "BuildingCollision"
+	collision.collision_layer = 1
+	collision.collision_mask = 0
+	collision.set_meta("city_building_id", building_id)
+	# These two greybox buildings really are solid boxes; don't create fake
+	# entrances through a visible wall. Imported buildings use their own surfaces.
+	_add_collision_box(collision, Vector3(BUILDING_WIDTH, collision_height, BUILDING_DEPTH), Vector3(0.0, collision_height * 0.5, 0.0))
+	parent.add_child(collision)
+	var facade_shape := BoxShape3D.new()
+	facade_shape.size = Vector3(BUILDING_WIDTH, collision_height - 0.22, BUILDING_DEPTH)
+	_create_building_occluder(parent, building_id, facade_shape, Transform3D(Basis.IDENTITY, Vector3(0.0, (collision_height + 0.22) * 0.5, 0.0)))
+
+
+func _create_model_collision(parent: Node3D, model_fit: Node3D, building_id: int, surface_shape: Shape3D) -> void:
+	# Shared, offline-simplified surfaces preserve recessed facades, openings,
+	# balconies and stairs without cooking millions of triangles on every entry.
+	var collision := StaticBody3D.new()
+	collision.name = "BuildingCollision"
+	collision.collision_layer = 1
+	collision.collision_mask = 0
+	collision.set_meta("city_building_id", building_id)
+	parent.add_child(collision)
+	var surface := CollisionShape3D.new()
+	surface.name = "ModelSurface"
+	surface.shape = surface_shape
+	surface.transform = model_fit.transform * Transform3D(model_fit.get_meta("collision_orientation"), Vector3.ZERO)
+	collision.add_child(surface)
+	_create_building_occluder(parent, building_id, surface_shape, surface.transform)
+	# Match the visible 22 cm plinth exactly; the player's step solver climbs it.
+	_add_collision_box(collision, Vector3(BUILDING_WIDTH, 0.22, BUILDING_DEPTH), Vector3(0.0, 0.11, 0.0))
+
+
+func _create_building_occluder(parent: Node3D, building_id: int, surface_shape: Shape3D, surface_transform: Transform3D) -> void:
+	# Share the compact mesh, but isolate camera queries from walking, combat,
+	# the lot-sized foundation, and other non-fading geometry.
+	var occluder := StaticBody3D.new()
+	occluder.name = "CameraOccluder"
+	occluder.collision_layer = CAMERA_OCCLUSION_MASK
+	occluder.collision_mask = 0
+	occluder.set_meta("city_building_id", building_id)
+	var surface := CollisionShape3D.new()
+	surface.shape = surface_shape
+	surface.transform = surface_transform
+	occluder.add_child(surface)
+	parent.add_child(occluder)
+
+
+func _add_collision_box(body: StaticBody3D, dimensions: Vector3, location: Vector3) -> void:
+	if dimensions.x <= 0.01 or dimensions.y <= 0.01 or dimensions.z <= 0.01:
+		return
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = dimensions
+	shape.shape = box
+	shape.position = location
+	body.add_child(shape)
+
+
+func _create_building_identity(upper: Node3D, kind: String, height: float, facade_width: float, facade_depth: float) -> void:
 	if kind == "residential":
-		_box(upper, "RoofUtility", Vector3(1.6, 0.38, 1.15), Vector3(-1.7, height + 0.35, -1.4), _materials["pavement"])
+		# Imported residences already include their own roof equipment.
 		return
 	var accent: StandardMaterial3D = _materials[kind + "_sign"]
-	_box(upper, "FunctionBand", Vector3(7.46, 0.24, 0.14), Vector3(0.0, height - 0.15, 3.78), accent)
+	var front_z := facade_depth * 0.5 + 0.08
+	_box(upper, "FunctionBand", Vector3(facade_width - 0.54, 0.24, 0.14), Vector3(0.0, height - 0.15, front_z), accent)
 	var label := Label3D.new()
 	label.name = "BuildingFunction"
 	label.font = LABEL_FONT
@@ -457,33 +589,35 @@ func _create_building_identity(upper: Node3D, kind: String, height: float) -> vo
 	label.pixel_size = 0.014
 	label.outline_size = 5
 	label.modulate = Color("edf6f1")
-	label.position = Vector3(0.0, height - 0.75, 3.83)
+	label.position = Vector3(0.0, height - 0.75, front_z + 0.05)
 	upper.add_child(label)
-	label.scale.x = 7.4 / BUILDING_WIDTH
 	match kind:
 		"shop":
-			_box(upper, "ShopAwning", Vector3(4.9, 0.15, 0.68), Vector3(0.0, 2.15, 3.78), accent)
+			_box(upper, "ShopAwning", Vector3(4.9, 0.15, 0.68), Vector3(0.0, 2.15, front_z), accent)
 		"medical":
 			_box(upper, "MedicalCross", Vector3(1.65, 0.12, 0.5), Vector3(0.0, height + 0.23, 0.0), accent)
 			_box(upper, "MedicalCross", Vector3(0.5, 0.12, 1.65), Vector3(0.0, height + 0.23, 0.0), accent)
 		"police":
 			_box(upper, "PoliceLight", Vector3(1.2, 0.23, 0.5), Vector3(0.0, height + 0.3, 0.0), accent)
 			_box(upper, "PoliceLightDivider", Vector3(0.14, 0.25, 0.54), Vector3(0.0, height + 0.3, 0.0), _materials["door"])
-		"office":
+		"factory":
 			_box(upper, "OfficeSkylight", Vector3(3.8, 0.14, 2.0), Vector3(0.0, height + 0.21, 0.0), _materials["glass"])
 
 
 func _create_encounters(rng: RandomNumberGenerator) -> void:
 	var candidates: Array[Dictionary] = []
-	for line in STREET_COORDINATES:
-		for segment in range(GRID_SIZE):
-			var start := -HALF_GRID_SPAN + float(segment) * CELL_SIZE
-			var horizontal_mid := Vector3(start + CELL_SIZE * 0.5, 0.0, line)
-			var vertical_mid := Vector3(line, 0.0, start + CELL_SIZE * 0.5)
+	for line in STREET_Z:
+		for segment in range(GRID_COLUMNS):
+			var start := -HALF_GRID_SPAN_X + float(segment) * CELL_WIDTH
+			var horizontal_mid := Vector3(start + CELL_WIDTH * 0.5, 0.0, line)
 			if horizontal_mid.distance_to(spawn_position) > 10.0:
-				candidates.append({"position": horizontal_mid, "axis": Vector3.RIGHT, "endpoint_a": Vector3(start, 0.0, line), "endpoint_b": Vector3(start + CELL_SIZE, 0.0, line)})
+				candidates.append({"position": horizontal_mid, "axis": Vector3.RIGHT, "endpoint_a": Vector3(start, 0.0, line), "endpoint_b": Vector3(start + CELL_WIDTH, 0.0, line)})
+	for line in STREET_X:
+		for segment in range(GRID_ROWS):
+			var start := -HALF_GRID_SPAN_Z + float(segment) * CELL_DEPTH
+			var vertical_mid := Vector3(line, 0.0, start + CELL_DEPTH * 0.5)
 			if vertical_mid.distance_to(spawn_position) > 10.0:
-				candidates.append({"position": vertical_mid, "axis": Vector3.BACK, "endpoint_a": Vector3(line, 0.0, start), "endpoint_b": Vector3(line, 0.0, start + CELL_SIZE)})
+				candidates.append({"position": vertical_mid, "axis": Vector3.BACK, "endpoint_a": Vector3(line, 0.0, start), "endpoint_b": Vector3(line, 0.0, start + CELL_DEPTH)})
 	_shuffle(candidates, rng)
 	for index in range(mini(8, candidates.size())):
 		var data: Dictionary = candidates[index].duplicate()

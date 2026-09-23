@@ -1,7 +1,8 @@
 extends SceneTree
 ## Real-scene progression: physical interaction, live deck growth, reset and cycling.
 
-const NEW_KINDS: Array[String] = ["punch", "shot", "charged_slash", "blink", "jet_jump", "airborne_slash", "dive_slash"]
+const NEW_KINDS: Array[String] = ["punch", "sweep", "shot", "charged_slash", "blink", "jet_jump", "airborne_slash", "dive_slash"]
+const CATALOG = preload("res://card_catalog.gd")
 var scene: Node3D
 var player: CharacterBody3D
 var deck: Node
@@ -33,7 +34,7 @@ func _run() -> void:
 	var unlocked_count := 0
 	for entry in catalog_browser.displayed_cards:
 		unlocked_count += int(entry.get("unlocked", false))
-	_check(catalog_browser.displayed_cards.size() == 10 and unlocked_count == 3, "Discovery browser shows ten actions with only three restored")
+	_check(catalog_browser.displayed_cards.size() == 11 and unlocked_count == 3, "Discovery browser shows eleven actions with only three restored")
 	_check(deck.get_card_snapshot().size() == 10, "Locked catalog entries never create physical cards")
 	scene.close_card_browser()
 	var original: Array = deck.get_card_snapshot()
@@ -79,21 +80,21 @@ func _run() -> void:
 			_check(deck.is_kind_unlocked(kind) and _kind_count(kind) == 1, "Recovered %s has exactly one physical card" % kind)
 		_check(not scene.try_interact(), "A restored terminal cannot duplicate rewards")
 		_check(_deck_valid(total), "Card identity and zone conservation survive restoration")
-	_check(deck.total_cards == 17, "All ten actions produce seventeen physical cards")
+	_check(deck.total_cards == 18, "All eleven actions produce eighteen physical cards")
 	scene.open_card_browser(&"catalog")
 	var all_restored := true
 	for entry in catalog_browser.displayed_cards:
 		all_restored = all_restored and bool(entry.get("unlocked", false))
-	_check(all_restored and catalog_browser.displayed_cards.size() == 10, "Discovery browser updates every unlock state")
+	_check(all_restored and catalog_browser.displayed_cards.size() == 11, "Discovery browser updates every unlock state")
 	scene.close_card_browser()
 	scene.open_card_browser(&"all")
 	var browser: Control = scene.get("hud").card_browser
-	_check(browser.displayed_cards.size() == 17, "Complete deck browser immediately includes every unlocked card")
+	_check(browser.displayed_cards.size() == 18, "Complete deck browser immediately includes every unlocked card")
 	scene.close_card_browser()
 	scene.restart()
 	scene.get("enemy").combat_enabled = false
 	await _steps(2)
-	_check(deck.total_cards == 17 and _deck_valid(17), "R preserves unlocks and rebuilds seventeen unique cards")
+	_check(deck.total_cards == 18 and _deck_valid(18), "R preserves unlocks and rebuilds eighteen unique cards")
 	for terminal in terminals:
 		_check(terminal.is_restored, "R preserves restored terminal appearance")
 	await _test_full_deck_cycle()
@@ -102,7 +103,7 @@ func _run() -> void:
 	fresh.set_script(load("res://deck.gd"))
 	root.add_child(fresh)
 	fresh.setup(player, 44)
-	_check(fresh.total_cards == 10 and not fresh.is_kind_unlocked("punch"), "Unlock scope is this session; a fresh deck starts with basic memories")
+	_check(fresh.total_cards == 10 and not fresh.is_kind_unlocked("punch") and not fresh.is_kind_unlocked("sweep"), "Unlock scope is this session; a fresh deck starts with basic memories")
 	fresh.queue_free()
 	print("UNLOCK RESULT: %d passed, %d failed" % [passed, failed])
 	quit(0 if failed == 0 else 1)
@@ -132,9 +133,9 @@ func _test_full_deck_cycle() -> void:
 			saw[kind] = true
 			all_valid = all_valid and deck.hand[slot].is_empty() and _has_id(deck.discard_pile, card_id)
 		await _steps(64)
-		all_valid = all_valid and _deck_valid(17)
+		all_valid = all_valid and _deck_valid(18)
 	_check(all_playable, "Every expanded-deck card can be played through the real deck")
-	_check(saw.size() == 10, "Random drawing reaches all ten action kinds")
+	_check(saw.size() == CATALOG.kinds().size(), "Random drawing reaches every action kind")
 	_check(all_valid, "Expanded deck conserves unique cards across play, refill and shuffle")
 	_check(shuffled[0] >= 3, "Expanded deck recycles discarded cards on demand across multiple cycles")
 

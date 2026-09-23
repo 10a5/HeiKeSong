@@ -11,6 +11,7 @@ const EPS := 0.08
 var scene: Node
 var player: CharacterBody3D
 var deck: Node
+var adaptive_brain: Node
 var shuffle_events: Array[int] = []
 var draw_events: Array[Dictionary] = []
 var discard_events: Array[Dictionary] = []
@@ -63,9 +64,14 @@ func _run() -> void:
 	_check(scene is Node3D, "Main scene is a real 3D scene")
 	_check(scene.get("camera") is Camera3D and scene.get("camera").current, "Scene has an active Camera3D")
 	_check(scene.get("hud") is Control, "Energy and cards have a screen-space HUD")
+	adaptive_brain = scene.get("boss_brain") as Node
+	_check(adaptive_brain != null and adaptive_brain.get("player") == player, "Adaptive boss brain observes the live player")
 	_check(_near(player.movement_yaw, scene.get("camera_yaw")), "Player movement tracks the camera yaw")
 	_check_reset("Initial state")
 	await _test_costs_and_recovery()
+	var observed: Dictionary = adaptive_brain.snapshot()
+	_check(int(observed["total_actions_seen"]) > 0, "Adaptive brain records accepted player actions from the live scene")
+	_check(int(observed["attempts"]["rejected"]) > 0, "Adaptive brain records rejected action attempts")
 	await _test_arrow_key_bindings()
 	await _test_camera_inputs()
 	await _test_camera_relative_movement()
@@ -105,10 +111,10 @@ func _test_costs_and_recovery() -> void:
 	player.reset_player()
 	_check(player.request_card("roll"), "Roll can be played at full energy")
 	_check(_near(player.energy, 7.0), "Roll costs exactly 3 energy")
-	_check(player.is_rolling and _near(player.roll_time_left, 0.22), "Roll starts with its 0.22-second lifetime")
-	await _steps(16)
+	_check(player.is_rolling and _near(player.roll_time_left, 0.44), "Roll starts with its 0.44-second lifetime")
+	await _steps(30)
 	_check(not player.is_rolling, "Roll completes automatically")
-	_check(_xz_distance(player.position, SPAWN) > 3.0 and _xz_distance(player.position, SPAWN) < 3.16, "Roll travels 14 units/second for 0.22 seconds")
+	_check(_xz_distance(player.position, SPAWN) > 3.0 and _xz_distance(player.position, SPAWN) < 3.16, "Roll travels 7 units/second for 0.44 seconds")
 	_check(absf(player.position.y - SPAWN.y) < 0.1, "Roll remains grounded")
 	player.reset_player()
 	player.energy = 1.5
@@ -885,9 +891,9 @@ func _test_cybernetic_action_speeds() -> void:
 		else:
 			_check(not player.request_card("slash"), "Boost activation does not allow another card to bypass the %s lock" % kind)
 		await _steps(4)
-		var expected_speed := 14.0 if kind == "roll" else 16.0
+		var expected_speed := 7.0 if kind == "roll" else 16.0
 		_check(_near(_horizontal(player.velocity).length(), expected_speed, 0.001), "Boost does not multiply the fixed %s speed" % kind)
-		await _steps(16)
+		await _steps(30 if kind == "roll" else 16)
 		var expected_distance := 3.08 if kind == "roll" else 3.84
 		_check(_near(_xz_distance(player.position, SPAWN), expected_distance, 0.06) and not player.is_action_locked() and player.is_cybernetic_active, "%s keeps its normal distance and finishes while boost remains active" % kind)
 	player.reset_player()
@@ -1049,9 +1055,9 @@ func _test_turn_angle_speed() -> void:
 		_check(player.request_card(kind), "Reverse-facing %s begins normally" % kind)
 		_release_all()
 		await _steps(1)
-		var expected_speed := 14.0 if kind == "roll" else 16.0
+		var expected_speed := 7.0 if kind == "roll" else 16.0
 		_check(absf(wrapf(model_heading.rotation.y - PI, -PI, PI)) > deg_to_rad(160.0) and _near(_horizontal(player.velocity).length(), expected_speed, 0.001), "%s keeps its fixed speed even while the model is nearly opposite its travel direction" % kind)
-		await _steps(19)
+		await _steps(30 if kind == "roll" else 19)
 		var expected_distance := 3.08 if kind == "roll" else 3.84
 		_check(_near(_xz_distance(player.position, SPAWN), expected_distance, 0.06), "Turning does not shorten the fixed %s travel distance" % kind)
 
@@ -1118,7 +1124,7 @@ func _test_jump_movement_independence() -> void:
 		player.request_jump()
 		# Keep this arc/boost comparison aligned; turning in air is tested separately.
 		Input.action_press("move_up")
-		await _steps(12)
+	await _steps(30)
 		heights.append(player.position.y)
 		_check(_near(_horizontal(player.velocity).length(), 9.9 if boost else 5.5, 0.01), "Air control retains the current horizontal movement speed (boost=%s)" % boost)
 	_check(_near(heights[0], heights[1], 0.001), "Cybernetic movement boost does not change the jump arc")

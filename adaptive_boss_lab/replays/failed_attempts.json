@@ -1,0 +1,10 @@
+{
+  "name": "能量不足玩家",
+  "description": "反复尝试高费复合牌但能量不足，验证拒绝率会进入世界模型。",
+  "events": [
+    {"type":"attempt", "kind":"dash_slash", "accepted":false, "reason":"insufficient_energy"},
+    {"type":"attempt", "kind":"roll", "accepted":false, "reason":"insufficient_energy"},
+    {"type":"action", "kind":"punch", "cost":1, "energy":1, "distance":3.0},
+    {"type":"attempt", "kind":"dash_slash", "accepted":false, "reason":"insufficient_energy"}
+  ]
+}

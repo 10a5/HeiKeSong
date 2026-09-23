@@ -5,10 +5,10 @@ const CATALOG = preload("res://card_catalog.gd")
 const UI_FONT = preload("res://assets/fonts/NotoSansSC-Regular.ttf")
 const COLORS := {
 	"residential": Color("728795"), "shop": Color("ffbd72"),
-	"office": Color("bba2ef"), "medical": Color("74edba"),
+	"factory": Color("bba2ef"), "medical": Color("74edba"),
 	"police": Color("79baff")
 }
-const NAMES := {"residential": "住宅", "shop": "商店", "office": "写字楼", "medical": "医疗站", "police": "公安局"}
+const NAMES := {"residential": "住宅", "shop": "商店", "factory": "工厂", "medical": "医疗站", "police": "公安局"}
 
 @export var interaction_radius := 2.2
 var kind := "residential"
@@ -89,7 +89,7 @@ func interact() -> bool:
 				return false
 			used = true
 			_message("治疗完成 · 生命 +%.0f" % restored)
-		"office":
+		"factory":
 			used = true
 			match event_index:
 				0:
@@ -151,7 +151,7 @@ func _process(_delta: float) -> void:
 	match kind:
 		"shop": _prompt.text = "E  购买记忆 · 20 信用" if _has_locked_cards() else "E  能量补给 · 10 信用"
 		"medical": _prompt.text = "E  免费治疗 · +40 生命"
-		"office": _prompt.text = "E  搜索遗留物"
+		"factory": _prompt.text = "E  搜索遗留物"
 		"police": _prompt.text = "E  打开装备箱"
 
 

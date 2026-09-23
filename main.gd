@@ -5,6 +5,7 @@ extends Node3D
 const HUD_SCRIPT = preload("res://hud.gd")
 const DECK_SCRIPT = preload("res://deck.gd")
 const ENEMY_SCRIPT = preload("res://enemy.gd")
+const BOSS_BRAIN_SCRIPT = preload("res://boss_brain.gd")
 const UNLOCK_TERMINAL_SCRIPT = preload("res://unlock_terminal.gd")
 const DEFAULT_YAW := 0.42
 const DEFAULT_PITCH := 0.74
@@ -18,6 +19,9 @@ const CAMERA_MAX_DISTANCE := 85.0
 var hud: Control
 var deck: Node
 var enemy: CharacterBody3D
+## The adaptive brain is telemetry + bounded planning only. A future final boss
+## can consume its reaction_requested signal without putting an LLM in combat.
+var boss_brain: Node
 var unlock_terminals: Array = []
 var camera: Camera3D
 var paused := false
@@ -60,6 +64,7 @@ func _ready() -> void:
 	hud.pause_requested.connect(toggle_pause)
 	hud.browser_requested.connect(open_card_browser)
 	hud.browser_close_requested.connect(close_card_browser)
+	_setup_adaptive_brain()
 	player.movement_yaw = camera_yaw
 
 
@@ -175,6 +180,25 @@ func _on_enemy_defeated() -> void:
 		player.status_changed.emit("训练敌人已击败 · 按 R 再来一局", false)
 
 
+func _setup_adaptive_brain() -> void:
+	if is_instance_valid(boss_brain):
+		return
+	boss_brain = BOSS_BRAIN_SCRIPT.new()
+	boss_brain.name = "AdaptiveBossBrain"
+	add_child(boss_brain)
+	boss_brain.attach_player(player)
+	boss_brain.reaction_requested.connect(_on_adaptive_reaction)
+	if is_instance_valid(enemy) and boss_brain.has_method("attach_opponent"):
+		boss_brain.attach_opponent(enemy)
+
+
+func _on_adaptive_reaction(reaction: StringName, payload: Dictionary) -> void:
+	# Keep the current training foe deterministic. The hook is ready for the
+	# future Mirror controller, which can implement apply_adaptive_reaction().
+	if is_instance_valid(enemy) and enemy.has_method("apply_adaptive_reaction"):
+		enemy.apply_adaptive_reaction(reaction, payload)
+
+
 func restart() -> void:
 	hud.hide_browser()
 	_paused_before_browser = false
@@ -186,6 +210,10 @@ func restart() -> void:
 	camera_distance = DEFAULT_DISTANCE
 	player.reset_player()
 	enemy.reset_enemy()
+	if is_instance_valid(boss_brain):
+		boss_brain.reset_observation()
+		if boss_brain.has_method("attach_opponent"):
+			boss_brain.attach_opponent(enemy)
 	deck.reset_deck()
 	for terminal in unlock_terminals:
 		terminal.refresh_state()
@@ -242,7 +270,7 @@ func _create_camera() -> void:
 
 func _create_unlock_terminals() -> void:
 	var station_data: Array[Dictionary] = [
-		{"name": "AttackMemory", "title": "攻击记忆", "kinds": ["punch", "shot", "charged_slash"], "preview": "快拳 · 点射 · 蓄力重劈", "position": Vector3(-3.6, 0.0, 3.4), "color": Color("ffb66d")},
+		{"name": "AttackMemory", "title": "攻击记忆", "kinds": ["punch", "sweep", "shot", "charged_slash"], "preview": "快拳 · 扫腿 · 点射 · 蓄力重劈", "position": Vector3(-3.6, 0.0, 3.4), "color": Color("ffb66d")},
 		{"name": "MovementMemory", "title": "位移记忆", "kinds": ["blink", "jet_jump"], "preview": "短距闪现 · 喷射跃升", "position": Vector3(-8.0, 0.0, 5.8), "color": Color("74d9ef")},
 		{"name": "HybridMemory", "title": "复合记忆", "kinds": ["airborne_slash", "dive_slash"], "preview": "腾空斩 · 俯冲重斩", "position": Vector3(3.6, 0.0, 3.4), "color": Color("cba4ff")},
 	]

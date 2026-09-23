@@ -1,0 +1,59 @@
+{
+  "name": "混合型玩家",
+  "description": "射击、闪现和多种复合动作交替，验证世界模型积累证据后策略层选择保持距离。",
+  "events": [
+    {
+      "type": "action",
+      "kind": "shot",
+      "cost": 2,
+      "energy": 8,
+      "distance": 10.0
+    },
+    {
+      "type": "action",
+      "kind": "blink",
+      "cost": 3,
+      "energy": 6,
+      "distance": 8.0,
+      "is_dashing": true
+    },
+    {
+      "type": "action",
+      "kind": "dash_slash",
+      "cost": 5,
+      "energy": 5,
+      "distance": 4.0,
+      "is_dashing": true
+    },
+    {
+      "type": "action",
+      "kind": "airborne_slash",
+      "cost": 4,
+      "energy": 8,
+      "distance": 5.0
+    },
+    {
+      "type": "action",
+      "kind": "dash_slash",
+      "cost": 5,
+      "energy": 5,
+      "distance": 3.5,
+      "is_dashing": true
+    },
+    {
+      "type": "action",
+      "kind": "shot",
+      "cost": 2,
+      "energy": 8,
+      "distance": 9.0
+    },
+    {
+      "type": "action",
+      "kind": "dive_slash",
+      "cost": 5,
+      "energy": 6,
+      "distance": 4.0,
+      "is_diving": true
+    }
+  ]
+}
