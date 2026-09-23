@@ -57,40 +57,48 @@ func _test_seeded_layout() -> void:
 	_check(first_layout != _layout_snapshot(), "A different seed produces a different district layout")
 	await _new_floor(TEST_SEED)
 	var buildings: Array = city_map.building_data
-	_check(buildings.size() == 20 and floor_scene.services.size() == 20, "The dispersed 8 by 8 district contains exactly 20 building cells and service records")
+	var planned_houses: Array = city_map.map_plan.get("houses", [])
+	_check(buildings.size() == planned_houses.size() and floor_scene.services.size() == buildings.size() and buildings.size() >= 20, "Map C creates a continuous set of houses and matching service records")
 	var ids: Dictionary = {}
-	var cells: Dictionary = {}
 	var counts := {"residential": 0, "shop": 0, "factory": 0, "medical": 0, "police": 0}
-	var valid_grid := true
+	var valid_footprints := true
 	var valid_sizes := true
 	var valid_doors := true
 	for data: Dictionary in buildings:
-		var cell: Vector2i = data["cell"]
 		var at: Vector3 = data["position"]
 		var door: Vector3 = data["door_position"]
-		valid_grid = valid_grid and cell.x in range(8) and cell.y in range(8) and cell in city_map.map_plan["cells"] and not ids.has(data["id"]) and not cells.has(cell)
-		valid_grid = valid_grid and _near(at.x, -77.0 + cell.x * 22.0) and _near(at.z, -63.0 + cell.y * 18.0)
+		var footprint: PackedVector2Array = data.get("footprint", PackedVector2Array())
+		valid_footprints = valid_footprints and footprint.size() == 4 and not ids.has(data["id"])
+		for point: Vector2 in footprint:
+			valid_footprints = valid_footprints and point.x >= -50.001 and point.x <= 50.001 and point.y >= -50.001 and point.y <= 50.001
 		var height: float = data["height"]
-		var valid_height := height > 15.0 and height < 15.5 if data["kind"] == "residential" else height >= 7.0 and height <= 10.0
-		valid_sizes = valid_sizes and _near(float(data["width"]), 14.0) and _near(float(data["depth"]), 10.0) and valid_height
-		valid_doors = valid_doors and (absf(door.x - at.x) > 6.9 or absf(door.z - at.z) > 4.9)
+		var width := float(data["width"])
+		var depth := float(data["depth"])
+		var rotation := float(data.get("rotation_y", 0.0))
+		var valid_height := height > 3.0 and height < 20.0
+		var short_side := minf(width, depth)
+		valid_sizes = valid_sizes and _near(short_side, 6.0, 0.01) and width >= 6.0 and depth >= 6.0 and valid_height and is_finite(rotation)
+		var door_offset := door - at
+		valid_doors = valid_doors and door_offset.length() > 0.5 and door_offset.length() < maxf(width, depth) + 3.0
 		ids[data["id"]] = true
-		cells[cell] = true
 		if counts.has(data["kind"]):
 			counts[data["kind"]] += 1
 		else:
-			valid_grid = false
-		if city_map.map_plan.get("services", {}).has(cell):
-			valid_grid = valid_grid and data["kind"] == city_map.map_plan["services"][cell]
-	_check(valid_grid and ids.size() == 20 and cells.size() == 20, "Every dispersed planner cell has one unique building ID")
-	_check(valid_sizes, "Buildings use a compact 14 by 10 metre rectangular footprint; residences use a 3m-per-floor calibrated height")
-	_check(valid_doors, "Building doors face an adjacent planner road cell")
-	_check(counts == {"residential": 12, "shop": 2, "factory": 3, "medical": 2, "police": 1}, "Every seed includes residential, shop, factory, medical and police categories")
-	_check(_near(city_map.road_width, 8.0) and _near(city_map.block_size_x, 22.0) and _near(city_map.block_size_z, 18.0), "Street gaps are eight metres around compact rectangular buildings")
-	_check(city_map.land_rect == Rect2(-92.0, -76.0, 184.0, 152.0), "Land follows the dispersed rectangular district")
-	_check(city_map.shallow_rect == Rect2(-110.0, -94.0, 220.0, 188.0), "The shallow shelf follows every dispersed land edge")
-	_check(city_map.graph_connected and city_map.graph_edge_count >= 19 and city_map.bridge_data.size() == city_map.graph_edge_count, "The seeded graph connects every building and preserves bridge route metadata")
-	_check(city_map.encounters_data.size() == 8 and floor_scene.encounters.size() == 8, "Eight street encounters are generated")
+			valid_footprints = false
+	_check(valid_footprints and ids.size() == buildings.size(), "Every Map C house has one unique ID and a complete in-bounds footprint")
+	_check(valid_sizes, "Imported buildings use a six-metre short side with model-derived long sides")
+	_check(valid_doors, "Every service anchor is placed near its model footprint")
+	_check(counts["residential"] > 0 and counts["shop"] > 0 and counts["factory"] > 0 and counts["medical"] > 0 and counts["police"] > 0, "Every generated district includes residential, shop, factory, medical and police categories")
+	_check(city_map.map_plan.get("roads", []).size() == 7 and city_map.road_data.size() == 7 and _near(city_map.road_width, 10.0), "Map C uses one ten-metre main road and six four-metre branches")
+	_check(city_map.land_rect == Rect2(-50.0, -50.0, 100.0, 100.0), "Map C uses the configured 100 by 100 metre land rectangle")
+	_check(city_map.shallow_rect == Rect2(-68.0, -68.0, 136.0, 136.0), "The shallow shelf follows the Map C land boundary")
+	var stats: Dictionary = city_map.map_plan.get("stats", {})
+	_check(float(stats.get("min_house_gap_m", 0.0)) >= 1.99 and float(stats.get("min_road_gap_m", 0.0)) >= 0.99, "Map C preserves the two-metre house gap and one-metre road setback")
+	_check(city_map.encounters_data.size() == 8 and floor_scene.encounters.size() == 8, "Eight street encounters are generated from Map C roads")
+	var enemy_types: Dictionary = {}
+	for encounter_data: Dictionary in city_map.encounters_data:
+		enemy_types[String(encounter_data.get("enemy_type", ""))] = int(enemy_types.get(String(encounter_data.get("enemy_type", "")), 0)) + 1
+	_check(enemy_types.has("sword") and enemy_types.has("boxer") and enemy_types.has("sniper"), "Seeded street encounters include sword, boxer and sniper roles")
 	var unique_encounters: Dictionary = {}
 	var valid_encounters := true
 	for data: Dictionary in city_map.encounters_data:
@@ -105,33 +113,37 @@ func _test_seeded_layout() -> void:
 
 
 func _test_city_geometry() -> void:
+	var roads_valid := true
 	var roads_clear := true
-	for street: Dictionary in city_map.map_plan["streets"]:
-		var from: Vector3 = city_map._cell_world(street["a"]) + Vector3.UP * 0.8
-		var to: Vector3 = city_map._cell_world(street["b"]) + Vector3.UP * 0.8
-		roads_clear = roads_clear and _ray_clear(from, to)
-	_check(roads_clear and city_map.map_plan["roads"].size() > 20, "Planner road cells remain physically open and provide a connected ground network")
-	_check(city_map.graph_connected and city_map.bridge_data.size() >= 19, "Graph backbone routes cover every dispersed building")
-	var route_segments := 0
-	var ground_routes_clear := true
-	for route: Dictionary in city_map.bridge_data:
-		var points: Array = route["ground_points"]
-		ground_routes_clear = ground_routes_clear and points.size() == route["points"].size() and points.size() == route["world_points"].size()
-		for index in range(points.size() - 1):
-			route_segments += 1
-			ground_routes_clear = ground_routes_clear and _ray_clear(points[index] + Vector3.UP * 0.8, points[index + 1] + Vector3.UP * 0.8)
-	_check(ground_routes_clear and city_map._generated.get_node("GroundGraphRoutes").get_child_count() == route_segments, "Every graph segment is rendered on clear ground, including all bends")
+	for road: Dictionary in city_map.road_data:
+		var points: Array = road["ground_points"]
+		var footprint: PackedVector2Array = road["footprint"]
+		roads_valid = roads_valid and points.size() == 2 and footprint.size() >= 4
+		roads_valid = roads_valid and points[0].distance_to(points[1]) > 10.0
+		roads_clear = roads_clear and _ray_clear(points[0] + Vector3.UP * 0.8, points[1] + Vector3.UP * 0.8)
+		for point: Vector2 in footprint:
+			roads_valid = roads_valid and point.x >= -50.001 and point.x <= 50.001 and point.y >= -50.001 and point.y <= 50.001
+	_check(roads_valid and city_map.road_data.size() == 7, "Map C renders one clipped main road and six clipped branches")
+	_check(roads_clear, "All seven road centrelines remain physically open for the player")
+	var house_geometry_valid := true
+	for data: Dictionary in city_map.building_data:
+		var footprint: PackedVector2Array = data["footprint"]
+		var expected_area := float(data["width"]) * float(data["depth"])
+		house_geometry_valid = house_geometry_valid and footprint.size() == 4 and _near(absf(_polygon_area(footprint)), expected_area, 0.08)
+		var node := city_map._generated.get_node("Building_%02d_%s" % [data["id"], data["kind"]]) as Node3D
+		house_geometry_valid = house_geometry_valid and is_instance_valid(node) and _near(node.rotation.y, float(data["rotation_y"]), 0.001)
+	_check(house_geometry_valid, "Every generated house keeps its rotated rectangular footprint and world transform")
+	var stats: Dictionary = city_map.map_plan.get("stats", {})
+	_check(float(stats.get("min_house_gap_m", 0.0)) >= 1.99 and float(stats.get("min_road_gap_m", 0.0)) >= 0.99, "Rotated houses keep the configured road setback and inter-house gap")
 	var start: Vector3 = city_map.spawn_position
 	await _park(start)
+	var first_road: Dictionary = city_map.road_data[0]
+	var road_axis: Vector3 = (first_road["ground_points"][1] - first_road["ground_points"][0]).normalized()
+	player.movement_yaw = _yaw_for_direction(road_axis)
 	Input.action_press("move_up")
-	await _steps(120)
+	await _steps(90)
 	_release_all()
-	_check(player.is_on_floor() and player.global_position.z < start.z - 4.0 and _near(player.global_position.x, start.x, 0.03), "The player can leave the planner start road without snagging buildings")
-	await _park(start)
-	Input.action_press("move_right")
-	await _steps(140)
-	_release_all()
-	_check(player.is_on_floor() and player.global_position.x > start.x + 8.0 and _near(player.global_position.z, start.z, 0.03), "The player can walk along the planner's south road and cross an intersection")
+	_check(player.is_on_floor() and player.global_position.distance_to(start) > 3.0, "The player can leave the Map C start road without snagging a house")
 	var surface_collisions := true
 	var shared_shapes: Dictionary = {}
 	var variant_count := 0
@@ -152,18 +164,18 @@ func _test_city_geometry() -> void:
 		else:
 			shared_shapes[key] = surface.shape
 			variant_count += 1
-		if data["kind"] == "residential" and data["model_index"] == 0:
+		if data["kind"] == "residential" and data["model_index"] == 0 and residence.is_empty():
 			residence = data
 	_check(surface_collisions and variant_count >= 5, "Imported buildings share baked surface collisions; only the visible 22 cm plinth is a box")
 	_check(not residence.is_empty(), "The geometry test seed includes the reference residence")
 	var residential_center: Vector3 = residence["position"]
-	# This facade is recessed from the 14 x 10 lot edge. The capsule must step
-	# onto its concrete plinth and reach the actual wall, not stop at the parcel.
-	await _park(residential_center + Vector3(0.0, 0.0, 6.5))
+	var residential_outward: Vector3 = (residence["door_position"] - residential_center).normalized()
+	await _park(residence["door_position"] + residential_outward * 0.45)
+	player.movement_yaw = _yaw_for_direction(-residential_outward)
 	Input.action_press("move_up")
-	await _steps(90)
+	await _steps(70)
 	_release_all()
-	_check(player.global_position.z < residential_center.z + 4.8 and player.global_position.z > residential_center.z + 2.5, "The player reaches the recessed residence facade and cannot walk through its visible wall")
+	_check(player.global_position.distance_to(residential_center) > 0.9 and player.global_position.distance_to(residential_center) < maxf(float(residence["width"]), float(residence["depth"])) * 0.8, "The player reaches the residence footprint and cannot walk through its visible wall")
 	_check(player.is_on_floor() and player.global_position.y >= 0.20, "Walking onto the visible building plinth needs no jump")
 
 
@@ -222,8 +234,9 @@ func _test_building_occlusion(data: Dictionary) -> void:
 	var camera := Camera3D.new()
 	floor_scene.add_child(camera)
 	var center: Vector3 = data["position"]
-	camera.global_position = center + Vector3(0.0, 2.5, -9.0)
-	await _park(center + Vector3(0.0, 0.0, 7.0))
+	var local_axis := Vector3(0.0, 0.0, 1.0).rotated(Vector3.UP, float(data.get("rotation_y", 0.0)))
+	camera.global_position = center - local_axis * 9.0 + Vector3.UP * 2.5
+	await _park(center + local_axis * 7.0)
 	camera.look_at(player.global_position + Vector3.UP * 1.1)
 	city_map.update_occlusion(camera, player)
 	_check(building_id in city_map._occluded_ids, "Camera occlusion rays detect the actual %s model surfaces" % data["kind"])
@@ -362,7 +375,7 @@ func _test_services() -> void:
 		overlays_removed = overlays_removed and shop_upper.find_child(old_name, true, false) == null and factory_upper.find_child(old_name, true, false) == null
 	_check(overlays_removed, "Imported shop and factory keep their model surfaces without generated labels, stripes or service markers")
 	_check(floor_scene.credits == 40 and not floor_scene.try_interact(), "The run begins with 40 credit and cannot activate remote buildings")
-	await _park(shop.global_position)
+	await _park(_service_access_position(shop))
 	_check(shop.can_interact(), "The shop model edge is reachable from its street")
 	var total_before: int = deck.total_cards
 	var hand_before: Array = deck.hand.duplicate(true)
@@ -374,7 +387,7 @@ func _test_services() -> void:
 	floor_scene.close_card_browser()
 	player.global_position.y += 4.0
 	_check(not floor_scene.try_interact(), "A player high above a door cannot use its service")
-	player.global_position = shop.global_position
+	player.global_position = _service_access_position(shop)
 	await _steps(2)
 	await _press_interact()
 	_check(floor_scene.shop_system.is_shop_open() and floor_scene.paused and floor_scene.credits == 40 and deck.total_cards == total_before, "Physical E opens the shop and pauses combat without spending gold")
@@ -390,7 +403,7 @@ func _test_services() -> void:
 	_check(not floor_scene.shop_system.buy_offer(offers[2]["id"]), "An unaffordable offer is rejected")
 	_check(floor_scene.credits == 0 and deck.get_card_snapshot() == no_money_snapshot, "Insufficient gold cannot consume money or create a card")
 	floor_scene.shop_system.close()
-	await _park(medical.global_position)
+	await _park(_service_access_position(medical))
 	await _press_interact()
 	_check(not medical.used and _near(player.health, player.max_health), "Full health preserves the one-use medical supply")
 	player.take_damage(60.0)
@@ -399,13 +412,13 @@ func _test_services() -> void:
 	player.take_damage(20.0)
 	await _press_interact()
 	_check(_near(player.health, 60.0), "An exhausted medical station cannot heal again")
-	await _park(police.global_position)
+	await _park(_service_access_position(police))
 	total_before = deck.total_cards
 	await _press_interact()
 	_check(police.used and floor_scene.credits == 20 and deck.total_cards == total_before + 1, "Police equipment awards one card and 20 credit")
 	await _press_interact()
 	_check(floor_scene.credits == 20 and deck.total_cards == total_before + 1, "The police cache cannot be claimed twice")
-	await _park(factory.global_position)
+	await _park(_service_access_position(factory))
 	var credits_before: int = floor_scene.credits
 	total_before = deck.total_cards
 	await _press_interact()
@@ -423,12 +436,12 @@ func _test_services() -> void:
 	total_before = deck.total_cards
 	await _press_interact()
 	_check(floor_scene.credits == credits_before and deck.total_cards == total_before, "The same factory event cannot award resources twice")
-	await _park(residential.global_position)
+	await _park(_service_access_position(residential))
 	_check(not floor_scene.try_interact(), "Residential blocks remain scenery without an unintended reward")
 	for kind in CATALOG.kinds():
 		deck.unlock_kind(kind)
 	var full_collection_count: int = deck.total_cards
-	await _park(shop.global_position)
+	await _park(_service_access_position(shop))
 	floor_scene.credits = 50
 	await _press_interact()
 	_check(floor_scene.credits == 50 and deck.total_cards == full_collection_count, "Reopening the shop leaves gold and cards untouched")
@@ -574,6 +587,31 @@ func _service(kind: String) -> Node3D:
 	return null
 
 
+func _service_access_position(service: Node3D) -> Vector3:
+	var data: Dictionary = service.data
+	var center: Vector3 = data["position"]
+	var yaw := float(data.get("rotation_y", 0.0))
+	var half_extents: Vector2 = data["interaction_half_extents"]
+	var local_entrance := (Vector3(data["door_position"]) - center).rotated(Vector3.UP, -yaw)
+	var local_point := Vector3.ZERO
+	if absf(local_entrance.x) / half_extents.x > absf(local_entrance.z) / half_extents.y:
+		local_point.x = signf(local_entrance.x) * (half_extents.x + 0.65)
+	else:
+		local_point.z = signf(local_entrance.z) * (half_extents.y + 0.65)
+	return center + local_point.rotated(Vector3.UP, yaw)
+
+
+func _yaw_for_direction(direction: Vector3) -> float:
+	return atan2(-direction.x, -direction.z)
+
+
+func _polygon_area(polygon: PackedVector2Array) -> float:
+	var area := 0.0
+	for index in range(polygon.size()):
+		area += polygon[index].cross(polygon[(index + 1) % polygon.size()])
+	return area * 0.5
+
+
 func _encounter_foes(encounter: Node) -> Array[CharacterBody3D]:
 	var result: Array[CharacterBody3D] = []
 	for target in get_nodes_in_group("combat_targets"):
@@ -596,6 +634,11 @@ func _factory_events() -> Dictionary:
 
 func _ray_clear(from: Vector3, to: Vector3) -> bool:
 	var query := PhysicsRayQueryParameters3D.create(from, to, 1)
+	var excluded: Array[RID] = [player.get_rid()]
+	for target in get_nodes_in_group("combat_targets"):
+		if target is CollisionObject3D:
+			excluded.append(target.get_rid())
+	query.exclude = excluded
 	return player.get_world_3d().direct_space_state.intersect_ray(query).is_empty()
 
 

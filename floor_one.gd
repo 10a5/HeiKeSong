@@ -1,5 +1,5 @@
 extends "res://main.gd"
-## First floor: grid cells contain buildings, graph edges host encounters.
+## First floor: Map C grows model-sized buildings along generated street edges.
 
 const CITY = preload("res://first_floor_map.gd")
 const ENCOUNTER = preload("res://street_encounter.gd")
@@ -528,7 +528,10 @@ func _finish_boss_load() -> void:
 	player.spawn_position = boss_arena.player_spawn()
 	player.global_position = player.spawn_position
 	player.velocity = Vector3.ZERO
-	player.bounds_enabled = true
+	# Boss fights use the imported arena mesh as the only physical boundary.
+	# The former rectangular clamp created an invisible air wall around the
+	# player; leave movement open so the duel can use the whole arena floor.
+	player.bounds_enabled = false
 	player.arena_rect = boss_arena.world_bounds()
 	boss_target = boss_arena.spawn_boss(player)
 	if is_instance_valid(boss_brain) and boss_brain.has_method("attach_opponent"):

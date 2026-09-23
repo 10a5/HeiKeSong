@@ -139,8 +139,8 @@ func _test_boss_transition_and_intro() -> void:
 		return
 
 	_check(is_instance_valid(floor_scene.boss_arena) and not floor_scene.city_map.visible, "Boss hand-off hides the generated city and mounts the duel arena")
-	_check(player.bounds_enabled and _inside_rect(player.global_position, floor_scene.boss_arena.world_bounds()), "The player is placed inside the Boss arena bounds")
-	_check(_inside_rect(floor_scene.boss_target.global_position, floor_scene.boss_arena.world_bounds()), "The mirror Boss is placed inside the arena bounds")
+	_check(not player.bounds_enabled, "Boss hand-off keeps the player's movement free of a rectangular air wall")
+	_check(not floor_scene.boss_target.bounds_enabled, "Boss hand-off keeps the mirror Boss free of a rectangular air wall")
 	_check(is_equal_approx(player.health, health_before) and is_equal_approx(player.energy, energy_before), "Boss hand-off preserves player health and energy")
 	_check(player_hand_snapshot(deck) == hand_before and int(deck.total_cards) == cards_before and inventory.get_items().size() == implants_before, "Boss hand-off preserves the current deck and implants")
 

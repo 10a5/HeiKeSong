@@ -5,9 +5,11 @@ extends Node3D
 
 const ARENA_SCENE: PackedScene = preload("res://model/决战场景.glb")
 const BOSS_SCRIPT = preload("res://mirror_boss.gd")
-## The duel floor is intentionally twice the original lab footprint.  Keep
+const BOSS_WATER_SCRIPT = preload("res://boss_water.gd")
+## The duel floor is intentionally twice the original lab footprint. Keep
 ## every world-space measurement below derived from this authored scale so
-## collision, spawns and the actors' playable bounds stay in sync.
+## collision, spawns and navigation metadata stay in sync. `arena_rect` is
+## retained for spawn/navigation queries; Boss movement does not clamp to it.
 const ARENA_SCALE: float = 0.6
 const SURFACE_RAY_UP: float = 50.0
 const SURFACE_RAY_DOWN: float = 20.0
@@ -16,6 +18,7 @@ const SURFACE_RAY_DOWN: float = 20.0
 
 var arena: Node3D
 var boss: CharacterBody3D
+var water: Node3D
 
 
 func _ready() -> void:
@@ -34,6 +37,25 @@ func _ready() -> void:
 			if body is StaticBody3D:
 				body.collision_layer = 1
 				body.collision_mask = 2 | 4
+	_create_water_overlay()
+	_align_water_overlay.call_deferred()
+
+
+func _create_water_overlay() -> void:
+	water = BOSS_WATER_SCRIPT.new()
+	water.name = "BossShallowWater"
+	add_child(water)
+	# The imported arena is larger than the old logical play rectangle. Extend
+	# the visual sheet over the full authored floor while keeping it non-solid.
+	var water_size := arena_rect.size + Vector2(18.0, 18.0)
+	water.setup(global_position, water_size, -15.0, global_position.y - 4.8)
+
+
+func _align_water_overlay() -> void:
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	if is_instance_valid(water):
+		water.align_to_surface(surface_point(0.0, 0.0))
 
 
 func world_bounds() -> Rect2:
@@ -66,7 +88,13 @@ func spawn_boss(player: CharacterBody3D) -> CharacterBody3D:
 	boss.spawn_position = surface_point(0.0, -1.0)
 	boss.arena_rect = world_bounds()
 	boss.arena_center = global_position
-	boss.bounds_enabled = true
+	# The GLB's real floor and obstacles remain collidable. The old rectangular
+	# clamp was an invisible air wall that prevented open movement across the
+	# authored arena, so both actors use free world movement here.
+	boss.bounds_enabled = false
+	player.bounds_enabled = false
 	add_child(boss)
 	boss.setup(player)
+	if is_instance_valid(water):
+		water.set_actors([player, boss])
 	return boss

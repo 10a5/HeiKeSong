@@ -24,6 +24,7 @@ var _deck: Node
 var _controller: Node
 var _interaction_center := Vector3.ZERO
 var _interaction_half_extents := Vector2(7.0, 5.0)
+var _interaction_rotation_y := 0.0
 ## Factory rewards are generated when the district is generated, so opening the
 ## same seeded map always presents the same choices.  The reward itself is
 ## claimed by floor_one's modal; no card or implant is added before the player
@@ -46,6 +47,7 @@ func setup(building_data: Dictionary, actor: CharacterBody3D, card_deck: Node, f
 	_controller = floor_controller
 	_interaction_center = data.get("interaction_center", data.get("position", Vector3.ZERO))
 	_interaction_half_extents = data.get("interaction_half_extents", Vector2(7.0, 5.0))
+	_interaction_rotation_y = float(data.get("interaction_rotation_y", 0.0))
 	interaction_radius = float(data.get("interaction_radius", interaction_radius))
 	# Keep this invisible node outside the model for nearest-service sorting.
 	# The proximity test below uses the actual model bounds instead.
@@ -86,6 +88,8 @@ func _is_nearby() -> bool:
 	var offset := _player.global_position - _interaction_center
 	if absf(offset.y) > 1.6:
 		return false
+	# Measure distance in the rotated building frame, matching its model/collider.
+	offset = offset.rotated(Vector3.UP, -_interaction_rotation_y)
 	# Distance to a model footprint, not to an arbitrary marker in the street.
 	# Standing inside a real recessed entrance is also considered nearby.
 	var dx := maxf(absf(offset.x) - _interaction_half_extents.x, 0.0)

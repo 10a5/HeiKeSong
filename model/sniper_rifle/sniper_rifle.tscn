@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="PackedScene" path="res://model/sniper_rifle/assets/sniper.glb" id="1_sniper"]
+[ext_resource type="Script" path="res://model/sniper_rifle/weapon_hand_mount.gd" id="2_mount"]
+[ext_resource type="PackedScene" path="res://model/sniper_rifle/assets/rifle.glb" id="3_rifle"]
+
+[node name="SniperRifle" type="Node3D"]
+transform = Transform3D(1.8424, 0, 0, 0, 1.8424, 0, 0, 0, 1.8424, 0, 0, 0)
+
+[node name="Sniper" parent="." instance=ExtResource("1_sniper")]
+
+[node name="WeaponMount" type="Node3D" parent="."]
+script = ExtResource("2_mount")
+character_path = NodePath("../Sniper")
+hand_bone = &"mixamorig_RightHand"
+mount = Transform3D(-0.036564, 0.995027, 0.092649, -0.999317, -0.035909, -0.00873, -0.00536, -0.092905, 0.995661, -0.044339, 0.090464, 0.043183)
+
+[node name="Rifle" parent="WeaponMount" instance=ExtResource("3_rifle")]
+transform = Transform3D(0.00669371, 0, 0, 0, 0.00669371, 0, 0, 0, 0.00669371, 0, 0, 0)

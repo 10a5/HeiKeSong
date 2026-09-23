@@ -1,28 +1,17 @@
 extends Node3D
-## Seeded first-floor district. A planning-only port of the handoff's
-## dispersed-city graph supplies building cells, roads and ground routes;
-## this node still owns the project's GLB geometry, water and occlusion.
+## Continuous road-and-house growth, using the Map C algorithm.
+## Imported building footprints have a six-metre short side, with uniform scale.
 
-const ROGUELIKE_LAYOUT = preload("res://roguelike_map_layout.gd")
-const GRID_COLUMNS := 8
-const GRID_ROWS := 8
-const TILE_SIZE := 2.0
-const CELL_WIDTH := 11.0 * TILE_SIZE
-const CELL_DEPTH := 9.0 * TILE_SIZE
-const STREET_WIDTH := 4.0 * TILE_SIZE
-const BUILDING_WIDTH := 7.0 * TILE_SIZE
-const BUILDING_DEPTH := 5.0 * TILE_SIZE
-const RESIDENTIAL_FLOOR_HEIGHT := 3.0
-const RESIDENTIAL_FLOORS := 5
-const RESIDENTIAL_TARGET_HEIGHT := RESIDENTIAL_FLOOR_HEIGHT * RESIDENTIAL_FLOORS
+const MAP_LAYOUT = preload("res://map_c_layout.gd")
+const MAP_SIZE := 100.0
+const BUILDING_SHORT_SIDE := 6.0
+const STREET_WIDTH := 10.0
 const SHALLOW_MARGIN_X := 18.0
 const SHALLOW_MARGIN_Z := 18.0
 const DEEP_WIDTH := 100.0
 const WATER_HEIGHT := -0.12
-const HALF_GRID_SPAN_X := float(GRID_COLUMNS) * CELL_WIDTH * 0.5
-const HALF_GRID_SPAN_Z := float(GRID_ROWS) * CELL_DEPTH * 0.5
-const LAND_HALF_EXTENT_X := HALF_GRID_SPAN_X + STREET_WIDTH * 0.5
-const LAND_HALF_EXTENT_Z := HALF_GRID_SPAN_Z + STREET_WIDTH * 0.5
+const LAND_HALF_EXTENT_X := MAP_SIZE * 0.5
+const LAND_HALF_EXTENT_Z := MAP_SIZE * 0.5
 const KIND_COLORS := {
 	"residential": Color("a4afb7"),
 	"shop": Color("e9b866"),
@@ -74,11 +63,8 @@ var seed_value: int = 104729
 var land_rect := Rect2(-LAND_HALF_EXTENT_X, -LAND_HALF_EXTENT_Z, LAND_HALF_EXTENT_X * 2.0, LAND_HALF_EXTENT_Z * 2.0)
 var shallow_rect := Rect2(land_rect.position - Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z), land_rect.size + Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z) * 2.0)
 var world_rect := shallow_rect.grow(DEEP_WIDTH)
-var spawn_position := Vector3(-CELL_WIDTH * 0.5, 0.0, HALF_GRID_SPAN_Z)
+var spawn_position := Vector3.ZERO
 var road_width: float = STREET_WIDTH
-var block_size: float = CELL_WIDTH
-var block_size_x: float = CELL_WIDTH
-var block_size_z: float = CELL_DEPTH
 var building_data: Array[Dictionary] = []
 var encounters_data: Array[Dictionary] = []
 var water_rects: Array[Rect2] = []
@@ -90,14 +76,10 @@ var _occluded_ids: Array[int] = []
 var _residential_bounds := AABB()
 var _model_bounds: Dictionary = {}
 var map_plan: Dictionary = {}
-var bridge_data: Array[Dictionary] = []
-var map_generation := "roguelike_graph"
+var road_data: Array[Dictionary] = []
+var building_templates: Array[Dictionary] = []
+var map_generation := "map_c_growth"
 var goal_position := Vector3.ZERO
-var graph_connected := false
-var graph_edge_count := 0
-var road_cells: Array[Vector2i] = []
-var _street_lines_x: Array[float] = []
-var _street_lines_z: Array[float] = []
 
 
 func _ready() -> void:
@@ -118,28 +100,28 @@ func generate(new_seed_value: int = 104729) -> void:
 		_generated.queue_free()
 	building_data.clear()
 	encounters_data.clear()
-	bridge_data.clear()
+	road_data.clear()
 	map_plan.clear()
-	road_cells.clear()
 	_building_visuals.clear()
 	_occluded_ids.clear()
 	_materials.clear()
-	var planner = ROGUELIKE_LAYOUT.new()
-	map_plan = planner.plan(seed_value)
-	graph_connected = bool(map_plan.get("connected", false))
-	graph_edge_count = int(map_plan.get("edges", []).size())
-	goal_position = _cell_world(map_plan.get("goal", Vector2i(3, 0)))
-	road_cells.assign(map_plan.get("roads", []))
-	_street_lines_x.clear()
-	_street_lines_z.clear()
-	for column in range(GRID_COLUMNS):
-		_street_lines_x.append((float(column) - 3.5) * CELL_WIDTH)
-	for row in range(GRID_ROWS):
-		_street_lines_z.append((float(row) - 3.5) * CELL_DEPTH)
-	land_rect = Rect2(-LAND_HALF_EXTENT_X, -LAND_HALF_EXTENT_Z, LAND_HALF_EXTENT_X * 2.0, LAND_HALF_EXTENT_Z * 2.0)
-	shallow_rect = Rect2(land_rect.position - Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z), land_rect.size + Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z) * 2.0)
+	_prepare_building_models()
+	building_templates = _build_model_templates()
+	var planner = MAP_LAYOUT.new()
+	map_plan = planner.plan(seed_value, building_templates)
+	goal_position = _layout_point_to_world(map_plan["goal"])
+	spawn_position = _layout_point_to_world(map_plan["start"])
+	var main_direction := (goal_position - spawn_position).normalized()
+	spawn_position += main_direction * 5.0
+	goal_position -= main_direction * 5.0
+	land_rect = Rect2(-MAP_SIZE * 0.5, -MAP_SIZE * 0.5, MAP_SIZE, MAP_SIZE)
+	shallow_rect = land_rect.grow(SHALLOW_MARGIN_X)
 	world_rect = shallow_rect.grow(DEEP_WIDTH)
-	spawn_position = _cell_world(map_plan.get("start", Vector2i(3, 7)))
+	for road: Dictionary in map_plan["roads"]:
+		var data := road.duplicate(true)
+		data["ground_points"] = [_layout_point_to_world(road["a"]), _layout_point_to_world(road["b"])]
+		data["footprint"] = _world_polygon(road["polygon"])
+		road_data.append(data)
 	water_rects = _rect_bands(land_rect, shallow_rect)
 	_generated = Node3D.new()
 	_generated.name = "GeneratedCity"
@@ -147,7 +129,6 @@ func generate(new_seed_value: int = 104729) -> void:
 	_create_materials()
 	_create_ground()
 	_create_streets()
-	_prepare_building_models()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	_create_building_data(rng)
@@ -189,7 +170,7 @@ func update_occlusion(camera: Camera3D, actor: Node3D) -> void:
 			var screen_point := camera.unproject_position(target)
 			var origin := camera.project_position(screen_point, camera.near)
 			var exclusions: Array[RID] = []
-			for _iteration in range(GRID_COLUMNS * GRID_ROWS):
+			for _iteration in range(maxi(_building_visuals.size(), 1)):
 				var query := PhysicsRayQueryParameters3D.create(origin, target, CAMERA_OCCLUSION_MASK)
 				query.exclude = exclusions
 				query.hit_from_inside = true
@@ -326,7 +307,7 @@ func _create_materials() -> void:
 
 
 func _create_ground() -> void:
-	_rect_box(_generated, "LandFloor", land_rect, -0.25, 0.5, _materials["road"], true)
+	_rect_box(_generated, "LandFloor", land_rect, -0.25, 0.5, _materials["pavement"], true)
 	for index in range(water_rects.size()):
 		var band := water_rects[index]
 		# Every shelf collider ends exactly at shallow_rect, including corners.
@@ -339,20 +320,21 @@ func _create_ground() -> void:
 	water_effects.name = "WaterEffects"
 	water_effects.setup(_materials["water"], land_rect, WATER_HEIGHT)
 	_generated.add_child(water_effects)
-	# CharacterBody3D does not auto-step over the 0.45 m quay. Short ramps at
-	# every street end let ordinary walking return from the shallow shelf.
-	for line in _street_lines_x:
-		_create_shore_ramp(Vector3(line, 0.0, land_rect.end.y), 0.0)
-		_create_shore_ramp(Vector3(line, 0.0, land_rect.position.y), PI)
-	for line in _street_lines_z:
-		_create_shore_ramp(Vector3(land_rect.end.x, 0.0, line), PI * 0.5)
-		_create_shore_ramp(Vector3(land_rect.position.x, 0.0, line), -PI * 0.5)
-	# The dispersed grid has no centre line; retain a central entry on each
-	# shore so approaches from open land can also return from the shelf.
-	_create_shore_ramp(Vector3(0.0, 0.0, land_rect.end.y), 0.0)
-	_create_shore_ramp(Vector3(0.0, 0.0, land_rect.position.y), PI)
-	_create_shore_ramp(Vector3(land_rect.end.x, 0.0, 0.0), PI * 0.5)
-	_create_shore_ramp(Vector3(land_rect.position.x, 0.0, 0.0), -PI * 0.5)
+	# Ramps follow actual road exits, with one additional entry per shore.
+	var exits: Array[Vector3] = [Vector3(0, 0, 50), Vector3(0, 0, -50), Vector3(50, 0, 0), Vector3(-50, 0, 0)]
+	for road: Dictionary in road_data:
+		for point: Vector3 in road["ground_points"]:
+			if absf(absf(point.x) - 50.0) < 0.01 or absf(absf(point.z) - 50.0) < 0.01:
+				exits.append(point)
+	for point in exits:
+		var yaw := 0.0
+		if absf(point.x - 50.0) < 0.01:
+			yaw = PI * 0.5
+		elif absf(point.x + 50.0) < 0.01:
+			yaw = -PI * 0.5
+		elif point.z < 0.0:
+			yaw = PI
+		_create_shore_ramp(point, yaw)
 	# Non-solid short edge dashes distinguish the shelf without building a wall.
 	for index in range(22):
 		var along_x := land_rect.position.x + 2.0 + float(index) * 6.0
@@ -365,106 +347,95 @@ func _create_ground() -> void:
 
 
 func _create_streets() -> void:
-	# The planner marks non-building cells as roads.  They stay on the shared
-	# land floor, so these meshes are purely visual and cannot create an air wall.
-	var roads: Array = map_plan.get("roads", [])
-	for cell: Vector2i in roads:
-		var center := _cell_world(cell)
-		_box(_generated, "PlannedRoadCell", Vector3(CELL_WIDTH - 0.35, 0.012, CELL_DEPTH - 0.35), center + Vector3.UP * 0.012, _materials["pavement"])
-		_box(_generated, "RoadDash", Vector3(0.16, 0.014, 2.8), center + Vector3.UP * 0.025, _materials["line"])
-	for street: Dictionary in map_plan.get("streets", []):
-		var start := _cell_world(street["a"])
-		var finish := _cell_world(street["b"])
-		var middle := (start + finish) * 0.5 + Vector3.UP * 0.022
+	var roads := Node3D.new()
+	roads.name = "GrowthRoads"
+	_generated.add_child(roads)
+	var road_index := 0
+	for road: Dictionary in road_data:
+		# Clipped polygon meshes keep angled road ends inside the land boundary.
+		_polygon_surface(roads, "Road_%s" % road["id"], road["footprint"], 0.018 + road_index * 0.0004, _materials["road"])
+		road_index += 1
+		var start: Vector3 = road["ground_points"][0]
+		var finish: Vector3 = road["ground_points"][1]
+		var direction := (finish - start).normalized()
 		var length := start.distance_to(finish)
-		var wide := STREET_WIDTH if bool(street.get("wide", false)) else 5.6
-		var dimensions := Vector3(length + wide, 0.014, wide) if absf(finish.x - start.x) > absf(finish.z - start.z) else Vector3(wide, 0.014, length + wide)
-		_box(_generated, "PlannedStreet", dimensions, middle, _materials["road"])
-	# Render every segment of the seeded graph on the shared land floor.
-	# Doglegs must affect the visible streets as well as encounter placement.
-	var routes := Node3D.new()
-	routes.name = "GroundGraphRoutes"
-	_generated.add_child(routes)
-	for edge: Dictionary in map_plan.get("edges", []):
-		var points := _graph_ground_points(edge)
-		for index in range(points.size() - 1):
-			var start := points[index]
-			var finish := points[index + 1]
-			var offset := finish - start
-			var length := offset.length()
-			var heading := atan2(offset.x, offset.z)
-			var road := _box(routes, "RouteSegment", Vector3(5.6, 0.012, length + 0.35), (start + finish) * 0.5 + Vector3.UP * 0.042, _materials["road"])
-			road.rotation.y = heading
-			for dash_index in range(int(length / 6.0)):
-				var along := (float(dash_index) + 0.5) * 6.0
-				var dash := _box(road, "RouteDash", Vector3(0.14, 0.012, 2.4), Vector3(0.0, 0.016, along - length * 0.5), _materials["line"])
-				dash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		for index in range(int(length / 6.0)):
+			var center := start + direction * ((float(index) + 0.5) * 6.0)
+			var dash := _box(roads, "RoadDash", Vector3(0.14, 0.012, 2.4), center + Vector3.UP * 0.04, _materials["line"])
+			dash.rotation.y = atan2(direction.x, direction.z)
+			dash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
-func _create_building_data(rng: RandomNumberGenerator) -> void:
-	# Sixteen non-service cells plus the four planner service cells fill the map.
-	var available_kinds: Array[String] = []
-	for _index in range(12):
-		available_kinds.append("residential")
-	available_kinds.append_array(["factory", "factory", "factory", "police"])
-	_shuffle(available_kinds, rng)
-	var service_kinds: Dictionary = {}
-	# Preserve both the handoff's service cells and their assigned service type.
-	for cell: Vector2i in map_plan.get("services", {}):
-		service_kinds[cell] = str(map_plan["services"][cell])
-	var index := 0
-	for cell: Vector2i in map_plan.get("cells", []):
-		var kind: String = str(service_kinds[cell]) if service_kinds.has(cell) else str(available_kinds.pop_back())
-		var center := _cell_world(cell)
-		var height := rng.randf_range(6.5, 10.0) if kind == "residential" else rng.randf_range(7.0, 10.0)
-		var model_index := -1
-		if kind == "residential":
-			model_index = rng.randi_range(0, RESIDENTIAL_MODELS.size() - 1)
-			height = RESIDENTIAL_TARGET_HEIGHT + 0.22
-		elif kind == "factory":
-			model_index = rng.randi_range(0, FACTORY_MODELS.size() - 1)
+func _polygon_surface(parent: Node3D, node_name: String, polygon: PackedVector2Array, height: float, material: Material) -> void:
+	var indices := Geometry2D.triangulate_polygon(polygon)
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for index in indices:
+		surface.set_normal(Vector3.UP)
+		surface.add_vertex(Vector3(polygon[index].x, height, polygon[index].y))
+	var mesh := MeshInstance3D.new()
+	mesh.name = node_name
+	mesh.mesh = surface.commit()
+	mesh.material_override = material
+	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mesh)
+
+
+func _build_model_templates() -> Array[Dictionary]:
+	var templates: Array[Dictionary] = []
+	for key: String in _model_bounds:
+		var bounds: AABB = _model_bounds[key]
+		var factor := BUILDING_SHORT_SIDE / minf(bounds.size.x, bounds.size.z)
+		var kind := "residential" if key.begins_with("residential") else "factory" if key.begins_with("factory") else key
+		var model_index := int(key.get_slice("_", 1)) if kind in ["residential", "factory"] else -1
+		templates.append({"key": key, "kind": kind, "model_index": model_index,
+			"short_side": BUILDING_SHORT_SIDE, "long_side": maxf(bounds.size.x, bounds.size.z) * factor,
+			"height": bounds.size.y * factor + 0.22,
+			"weight": 3.0 if kind == "residential" else 1.0})
+	# No police GLB is supplied; use an explicit six-by-eight greybox.
+	templates.append({"key": "police", "kind": "police", "model_index": -1,
+		"short_side": 6.0, "long_side": 8.0, "height": 7.5, "weight": 0.5})
+	return templates
+
+
+func _create_building_data(_rng: RandomNumberGenerator) -> void:
+	for house: Dictionary in map_plan["houses"]:
+		var template: Dictionary = house["template"]
+		var center := _layout_point_to_world(house["center"])
+		var angle := float(house["angle"])
+		if float(house["width"]) < float(house["depth"]):
+			angle += PI * 0.5
+		var entrance := _layout_point_to_world(house["entrance_candidate"])
+		var outward := (entrance - center).normalized()
 		building_data.append({
-			"id": index,
-			"cell": cell, "kind": kind,
-			"position": center,
-			"door_position": center + _door_offset(cell),
-			"height": height,
-			"width": BUILDING_WIDTH,
-			"depth": BUILDING_DEPTH,
-			"model_index": model_index,
+			"id": house["id"], "kind": template["kind"], "position": center,
+			"door_position": entrance + outward * 0.7,
+			"interaction_position": entrance + outward * 0.7,
+			"height": template["height"], "width": template["long_side"], "depth": 6.0,
+			"rotation_y": angle, "footprint": _world_polygon(house["polygon"]),
+			"model_index": template["model_index"], "model_key": template["key"],
+			"parent_kind": house["parent_kind"], "parent_id": house["parent_id"],
+			"placement_phase": house["placement_phase"],
 		})
-		index += 1
-
-
-func _cell_world(cell: Vector2i) -> Vector3:
-	return Vector3((float(cell.x) - 3.5) * CELL_WIDTH, 0.0, (float(cell.y) - 3.5) * CELL_DEPTH)
-
-
-func _door_offset(cell: Vector2i) -> Vector3:
-	var roads: Array = map_plan.get("roads", [])
-	var directions := [Vector2i.DOWN, Vector2i.RIGHT, Vector2i.UP, Vector2i.LEFT]
-	for direction: Vector2i in directions:
-		if cell + direction in roads:
-			if direction.x != 0:
-				return Vector3(direction.x * (BUILDING_WIDTH * 0.5 + 1.25), 0.0, 0.0)
-			return Vector3(0.0, 0.0, direction.y * (BUILDING_DEPTH * 0.5 + 1.25))
-	return Vector3(0.0, 0.0, BUILDING_DEPTH * 0.5 + 1.25)
 
 
 func _create_building(data: Dictionary) -> void:
 	var building := Node3D.new()
 	building.name = "Building_%02d_%s" % [data["id"], data["kind"]]
 	building.position = data["position"]
+	building.rotation.y = float(data["rotation_y"])
 	_generated.add_child(building)
 	var kind: String = data["kind"]
 	var height: float = data["height"]
+	var width: float = data["width"]
+	var depth: float = data["depth"]
 	var body_material: StandardMaterial3D = _materials[kind]
-	_box(building, "Sidewalk", Vector3(BUILDING_WIDTH + 0.9, 0.018, BUILDING_DEPTH + 0.9), Vector3(0.0, 0.009, 0.0), _materials["pavement"])
-	_box(building, "LowFootprint", Vector3(BUILDING_WIDTH, 0.22, BUILDING_DEPTH), Vector3(0.0, 0.11, 0.0), _materials["roof"])
+	_box(building, "Sidewalk", Vector3(width, 0.018, depth), Vector3(0.0, 0.009, 0.0), _materials["pavement"])
+	_box(building, "LowFootprint", Vector3(width, 0.22, depth), Vector3(0.0, 0.11, 0.0), _materials["roof"])
 	var upper := Node3D.new()
 	upper.name = "OccludableUpper"
 	building.add_child(upper)
-	var outline := _box(building, "OcclusionFootprint", Vector3(BUILDING_WIDTH + 0.04, 0.016, BUILDING_DEPTH + 0.04), Vector3(0, 0.235, 0), _materials[kind + "_sign"])
+	var outline := _box(building, "OcclusionFootprint", Vector3(width, 0.016, depth), Vector3(0, 0.235, 0), _materials[kind + "_sign"])
 	outline.visible = false
 	_building_visuals[int(data["id"])] = {"upper": upper, "outline": outline}
 	var model_fit: Node3D = null
@@ -472,24 +443,24 @@ func _create_building(data: Dictionary) -> void:
 	# Interaction starts from the model footprint, not from the old street
 	# marker. Greybox services keep the parcel-sized fallback below.
 	data["interaction_center"] = data["position"]
-	data["interaction_half_extents"] = Vector2(BUILDING_WIDTH * 0.5, BUILDING_DEPTH * 0.5)
+	data["interaction_half_extents"] = Vector2(width * 0.5, depth * 0.5)
 	data["interaction_radius"] = 1.15
 	if kind == "residential":
-		model_fit = _add_building_model(upper, RESIDENTIAL_MODELS[int(data.get("model_index", 0))], _model_bounds["residential_%d" % int(data.get("model_index", 0))], height)
+		model_fit = _add_building_model(upper, RESIDENTIAL_MODELS[int(data.get("model_index", 0))], _model_bounds["residential_%d" % int(data.get("model_index", 0))])
 		model_collision = RESIDENTIAL_COLLISIONS[int(data.get("model_index", 0))]
 	elif kind == "shop":
-		model_fit = _add_building_model(upper, SHOP_MODEL, _model_bounds["shop"], height)
+		model_fit = _add_building_model(upper, SHOP_MODEL, _model_bounds["shop"])
 		model_collision = SHOP_COLLISION
 	elif kind == "factory":
 		var factory_index := int(data.get("model_index", 0))
-		model_fit = _add_building_model(upper, FACTORY_MODELS[factory_index], _model_bounds["factory_%d" % factory_index], height)
+		model_fit = _add_building_model(upper, FACTORY_MODELS[factory_index], _model_bounds["factory_%d" % factory_index])
 		model_collision = FACTORY_COLLISIONS[factory_index]
 	elif kind == "medical":
-		model_fit = _add_building_model(upper, MEDICAL_MODEL, _model_bounds["medical"], height)
+		model_fit = _add_building_model(upper, MEDICAL_MODEL, _model_bounds["medical"])
 		model_collision = MEDICAL_COLLISION
 	else:
 		# Police remains a compact greybox facade until its new mesh is supplied.
-		upper.scale = Vector3(BUILDING_WIDTH / 7.4, 1.0, BUILDING_DEPTH / 7.4)
+		upper.scale = Vector3(width / 7.62, 1.0, depth / 7.62)
 		_box(upper, "Facade", Vector3(7.4, height - 0.22, 7.4), Vector3(0.0, (height + 0.22) * 0.5, 0.0), body_material)
 		_box(upper, "Roof", Vector3(7.62, 0.16, 7.62), Vector3(0.0, height + 0.08, 0.0), _materials["roof"])
 		_box(upper, "Door", Vector3(1.15, 1.85, 0.045), Vector3(0.0, 0.925, 3.725), _materials["door"])
@@ -505,14 +476,15 @@ func _create_building(data: Dictionary) -> void:
 				_box(upper, "Window", Vector3(0.04, 0.70, 1.22), Vector3(-3.725, window_y, offset_z), _materials["glass"])
 		_create_building_identity(upper, kind, height, 7.4, 7.4)
 	if model_fit != null:
-		_create_model_collision(building, model_fit, int(data["id"]), model_collision)
+		_create_model_collision(building, model_fit, int(data["id"]), model_collision, Vector2(width, depth))
 		var visible_size: Vector3 = model_fit.get_meta("visible_size")
 		data["interaction_half_extents"] = Vector2(maxf(visible_size.x * 0.5, 0.5), maxf(visible_size.z * 0.5, 0.5))
 		# This is only an invisible representative position used to choose the
 		# nearest service. E itself checks distance to the full model bounds.
-		data["interaction_position"] = data["position"] + Vector3(0.0, 0.0, float(data["interaction_half_extents"].y) + 0.35)
+		data["interaction_rotation_y"] = building.rotation.y
 	else:
-		_create_box_collision(building, int(data["id"]), height + 0.16)
+		_create_box_collision(building, int(data["id"]), height + 0.16, Vector2(width, depth))
+		data["interaction_rotation_y"] = building.rotation.y
 
 
 func _prepare_building_models() -> void:
@@ -545,19 +517,16 @@ func _measure_model_bounds(node: Node, parent_transform := Transform3D.IDENTITY)
 	return bounds
 
 
-func _add_building_model(parent: Node3D, scene: PackedScene, bounds: AABB, target_height: float) -> Node3D:
+func _add_building_model(parent: Node3D, scene: PackedScene, bounds: AABB) -> Node3D:
 	var fit := Node3D.new()
 	fit.name = "BuildingModelFit"
 	# Put the long side along the rectangular parcel's long axis, including
 	# variants whose source model faces across Z. Collision uses this same basis.
 	var orientation := Basis(Vector3.UP, PI * 0.5) if bounds.size.z > bounds.size.x else Basis.IDENTITY
 	var oriented_bounds := Transform3D(orientation, Vector3.ZERO) * bounds
-	# Keep each imported facade's aspect ratio. The height establishes the
-	# visual scale, then a footprint cap prevents unusual source-unit assets
-	# from spilling into the eight-metre street.
-	var uniform_scale := target_height / maxf(oriented_bounds.size.y, 0.001)
-	var footprint_scale := minf((BUILDING_WIDTH - 0.55) / maxf(oriented_bounds.size.x, 0.001), (BUILDING_DEPTH - 0.55) / maxf(oriented_bounds.size.z, 0.001))
-	uniform_scale = minf(uniform_scale, footprint_scale)
+	# Six metres is the real model short side, not a parcel cap. All three
+	# axes use the same factor, preserving the imported building's proportions.
+	var uniform_scale := BUILDING_SHORT_SIDE / minf(bounds.size.x, bounds.size.z)
 	fit.scale = Vector3.ONE * uniform_scale
 	fit.position = Vector3(-oriented_bounds.get_center().x * uniform_scale, 0.22 - oriented_bounds.position.y * uniform_scale, -oriented_bounds.get_center().z * uniform_scale)
 	fit.set_meta("collision_orientation", orientation)
@@ -574,12 +543,12 @@ func _add_building_model(parent: Node3D, scene: PackedScene, bounds: AABB, targe
 	fit.add_child(oriented)
 	oriented.add_child(model)
 	for mesh: MeshInstance3D in model.find_children("*", "MeshInstance3D", true, false):
-		# Godot's imported mesh LODs reduce the cost of the fifteen tall towers.
+		# Imported mesh LODs reduce rendering cost as the district grows.
 		mesh.lod_bias = 0.4
 	return fit
 
 
-func _create_box_collision(parent: Node3D, building_id: int, collision_height: float) -> void:
+func _create_box_collision(parent: Node3D, building_id: int, collision_height: float, footprint: Vector2) -> void:
 	var collision := StaticBody3D.new()
 	collision.name = "BuildingCollision"
 	collision.collision_layer = 1
@@ -587,14 +556,14 @@ func _create_box_collision(parent: Node3D, building_id: int, collision_height: f
 	collision.set_meta("city_building_id", building_id)
 	# These two greybox buildings really are solid boxes; don't create fake
 	# entrances through a visible wall. Imported buildings use their own surfaces.
-	_add_collision_box(collision, Vector3(BUILDING_WIDTH, collision_height, BUILDING_DEPTH), Vector3(0.0, collision_height * 0.5, 0.0))
+	_add_collision_box(collision, Vector3(footprint.x, collision_height, footprint.y), Vector3(0.0, collision_height * 0.5, 0.0))
 	parent.add_child(collision)
 	var facade_shape := BoxShape3D.new()
-	facade_shape.size = Vector3(BUILDING_WIDTH, collision_height - 0.22, BUILDING_DEPTH)
+	facade_shape.size = Vector3(footprint.x, collision_height - 0.22, footprint.y)
 	_create_building_occluder(parent, building_id, facade_shape, Transform3D(Basis.IDENTITY, Vector3(0.0, (collision_height + 0.22) * 0.5, 0.0)))
 
 
-func _create_model_collision(parent: Node3D, model_fit: Node3D, building_id: int, surface_shape: Shape3D) -> void:
+func _create_model_collision(parent: Node3D, model_fit: Node3D, building_id: int, surface_shape: Shape3D, footprint: Vector2) -> void:
 	# Shared, offline-simplified surfaces preserve recessed facades, openings,
 	# balconies and stairs without cooking millions of triangles on every entry.
 	var collision := StaticBody3D.new()
@@ -610,7 +579,7 @@ func _create_model_collision(parent: Node3D, model_fit: Node3D, building_id: int
 	collision.add_child(surface)
 	_create_building_occluder(parent, building_id, surface_shape, surface.transform)
 	# Match the visible 22 cm plinth exactly; the player's step solver climbs it.
-	_add_collision_box(collision, Vector3(BUILDING_WIDTH, 0.22, BUILDING_DEPTH), Vector3(0.0, 0.11, 0.0))
+	_add_collision_box(collision, Vector3(footprint.x, 0.22, footprint.y), Vector3(0.0, 0.11, 0.0))
 
 
 func _create_building_occluder(parent: Node3D, building_id: int, surface_shape: Shape3D, surface_transform: Transform3D) -> void:
@@ -671,68 +640,49 @@ func _create_building_identity(upper: Node3D, kind: String, height: float, facad
 
 func _create_encounters(rng: RandomNumberGenerator) -> void:
 	var candidates: Array[Dictionary] = []
-	# Handoff edges are bridge routes at y=8.  Project one clear segment of
-	# each route onto the ground and retain the complete elevated representation
-	# as bridge_data for a future stairs/flying traversal system.
-	for edge: Dictionary in map_plan.get("edges", []):
-		var points: Array = edge.get("points", [])
-		if points.size() < 2:
-			continue
-		var longest := -1.0
-		var selected_a := Vector2.ZERO
-		var selected_b := Vector2.ZERO
-		for point_index in range(points.size() - 1):
-			var point_a: Vector2 = points[point_index]
-			var point_b: Vector2 = points[point_index + 1]
-			var segment_length := point_a.distance_to(point_b)
-			if segment_length > longest:
-				longest = segment_length
-				selected_a = point_a
-				selected_b = point_b
-		var endpoint_a := _layout_point_to_world(selected_a)
-		var endpoint_b := _layout_point_to_world(selected_b)
-		var midpoint := (endpoint_a + endpoint_b) * 0.5
-		var axis := (endpoint_b - endpoint_a).normalized()
-		var bridge := edge.duplicate(true)
-		bridge["ground_points"] = _graph_ground_points(edge)
-		var elevated_points: Array[Vector3] = []
-		for point: Vector3 in bridge["ground_points"]:
-			elevated_points.append(point + Vector3.UP * 8.0)
-		bridge["world_points"] = elevated_points
-		bridge["endpoint_a"] = endpoint_a + Vector3.UP * 8.0
-		bridge["endpoint_b"] = endpoint_b + Vector3.UP * 8.0
-		bridge["ground_endpoint_a"] = endpoint_a
-		bridge["ground_endpoint_b"] = endpoint_b
-		bridge["elevation"] = 8.0
-		bridge_data.append(bridge)
-		if midpoint.distance_to(spawn_position) > 10.0:
-			candidates.append({"position": midpoint, "axis": axis, "endpoint_a": endpoint_a, "endpoint_b": endpoint_b, "graph_edge": bridge})
-	# A very short graph on an unusual seed should still produce the promised
-	# eight fights.  Planner streets are the deterministic ground fallback.
-	for street: Dictionary in map_plan.get("streets", []):
-		if candidates.size() >= 16:
-			break
-		var endpoint_a := _cell_world(street["a"])
-		var endpoint_b := _cell_world(street["b"])
-		var midpoint := (endpoint_a + endpoint_b) * 0.5
-		if midpoint.distance_to(spawn_position) > 10.0:
-			candidates.append({"position": midpoint, "axis": (endpoint_b - endpoint_a).normalized(), "endpoint_a": endpoint_a, "endpoint_b": endpoint_b, "ground_route": true})
+	for road: Dictionary in road_data:
+		var start: Vector3 = road["ground_points"][0]
+		var finish: Vector3 = road["ground_points"][1]
+		var direction := (finish - start).normalized()
+		var length := start.distance_to(finish)
+		for index in range(maxi(1, int(length / 14.0))):
+			var along := 7.0 + float(index) * 14.0
+			if along > length - 5.0:
+				continue
+			var midpoint := start + direction * along
+			if midpoint.distance_to(spawn_position) <= 15.0:
+				continue
+			candidates.append({"position": midpoint, "axis": direction,
+				"endpoint_a": midpoint - direction * 5.5, "endpoint_b": midpoint + direction * 5.5,
+				"road_id": road["id"], "road_width": road["width"]})
 	_shuffle(candidates, rng)
-	for index in range(mini(8, candidates.size())):
-		var data: Dictionary = candidates[index].duplicate()
-		data["id"] = index
+	var enemy_bag: Array[String] = ["sword", "boxer", "sniper", "sword", "boxer", "sniper", "sword", "boxer"]
+	_shuffle(enemy_bag, rng)
+	for candidate in candidates:
+		var separated := true
+		for accepted: Dictionary in encounters_data:
+			if Vector3(candidate["position"]).distance_to(accepted["position"]) < 10.0:
+				separated = false
+		if not separated:
+			continue
+		var data: Dictionary = candidate.duplicate()
+		data["id"] = encounters_data.size()
+		data["enemy_type"] = enemy_bag[encounters_data.size()]
 		encounters_data.append(data)
+		if encounters_data.size() == 8:
+			break
 
 
 func _layout_point_to_world(point: Vector2) -> Vector3:
-	return Vector3(point.x * CELL_WIDTH / ROGUELIKE_LAYOUT.CELL, 0.0, point.y * CELL_DEPTH / ROGUELIKE_LAYOUT.CELL)
+	return Vector3(point.x - MAP_SIZE * 0.5, 0.0, MAP_SIZE * 0.5 - point.y)
 
 
-func _graph_ground_points(edge: Dictionary) -> Array[Vector3]:
-	var points: Array[Vector3] = []
-	for point: Vector2 in edge.get("points", []):
-		points.append(_layout_point_to_world(point))
-	return points
+func _world_polygon(polygon: PackedVector2Array) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	for point in polygon:
+		var world := _layout_point_to_world(point)
+		result.append(Vector2(world.x, world.z))
+	return result
 
 
 func _create_spawn_marker() -> void:

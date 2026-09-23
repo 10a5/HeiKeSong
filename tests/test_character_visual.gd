@@ -336,7 +336,7 @@ func _test_new_card_animation_mapping() -> void:
 	await _steps(2)
 	_check(player.request_card("sweep"), "The sweep card starts from the player action API")
 	await _steps(1)
-	_check(animation_player.current_animation == "sweep_generated" or animation_player.current_animation.to_lower().contains("sweep"), "Sweep selects the sweep animation mapping")
+	_check(animation_player.current_animation == "front_kick_02" or animation_player.current_animation.to_lower().contains("front_kick"), "Sweep selects the authored roundhouse animation mapping")
 	await _steps(20)
 	player.reset_player()
 	await _steps(2)
@@ -397,7 +397,7 @@ func _test_front_kick_animation_mapping() -> void:
 		_check(authored_player.current_animation == "idle", "Missing front kick stays idle instead of substituting another attack")
 		_check(not bool(visual.get("_visual_action_active")), "Missing front kick does not invent a visual action tail")
 	else:
-		_check(authored_kick != String(visual.call("_resolve_animation_name", "sweep")), "Authored front kick remains separate from sweep")
+		_check(authored_kick == String(visual.call("_resolve_animation_name", "sweep")), "Player sweep reuses the authored front kick clip")
 
 	# Exercise name conversion and the independent playback clock even before
 	# the asset arrives. This single-bone fixture exists only inside this test;

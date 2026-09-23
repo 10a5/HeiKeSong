@@ -139,23 +139,20 @@ func _draw_city(rect: Rect2, expanded: bool) -> void:
 		return
 	draw_rect(rect, Color("285265"))
 	draw_rect(_world_rect(land, rect, bounds), Color("263540"))
-	# The map follows the same complete ground graph, including bent routes.
-	for route: Dictionary in city_map.get("bridge_data"):
-		var points: Array = route.get("ground_points", [])
-		for index in range(points.size() - 1):
-			var start: Vector3 = points[index]
-			var finish: Vector3 = points[index + 1]
-			draw_line(_world_point(Vector2(start.x, start.z), rect, bounds), _world_point(Vector2(finish.x, finish.z), rect, bounds), Color("536774"), 2.0 if expanded else 1.0, true)
+	for road: Dictionary in city_map.get("road_data"):
+		var polygon := PackedVector2Array()
+		for point: Vector2 in road["footprint"]:
+			polygon.append(_world_point(point, rect, bounds))
+		draw_colored_polygon(polygon, Color("536774"))
 	var buildings: Array = city_map.get("building_data")
-	var fallback_width := float(city_map.get("block_size")) - float(city_map.get("road_width"))
 	for building: Dictionary in buildings:
 		var at: Vector3 = building.get("position", Vector3.ZERO)
-		var width := float(building.get("width", fallback_width))
-		var depth := float(building.get("depth", width))
-		var block := Rect2(Vector2(at.x - width * 0.5, at.z - depth * 0.5), Vector2(width, depth))
+		var polygon := PackedVector2Array()
+		for point: Vector2 in building["footprint"]:
+			polygon.append(_world_point(point, rect, bounds))
 		var kind := str(building.get("kind", "residential"))
 		var color: Color = SERVICE.COLORS.get(kind, MUTED)
-		draw_rect(_world_rect(block, rect, bounds), color.darkened(0.15))
+		draw_colored_polygon(polygon, color.darkened(0.15))
 		if expanded:
 			var center := _world_point(Vector2(at.x, at.z), rect, bounds)
 			_text(center + Vector2(-6, 4), str(SERVICE.NAMES.get(kind, ""))[0], 11, Color("10212a"))

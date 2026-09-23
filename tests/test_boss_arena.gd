@@ -44,8 +44,12 @@ func _run() -> void:
 	boss.combo_finished.connect(func(kind: StringName): finishes.append(kind))
 	boss.attack_observed.connect(func(kind: String, hit: bool, damage: float): hits.append({"kind": kind, "hit": hit, "damage": damage}))
 	_check(arena.spawn_boss(player) == boss, "重复请求出生不会生成第二个 Boss")
-	_check(boss.bounds_enabled and boss.arena_rect == arena.world_bounds(), "Boss 启用偏移后的场地边界")
+	_check(not player.bounds_enabled and not boss.bounds_enabled and boss.arena_rect == arena.world_bounds(), "Boss 战关闭矩形空气墙并保留边界数据供导航")
 	_check(boss.arena_rect.has_point(Vector2(boss.global_position.x, boss.global_position.z)), "Boss 出生点位于偏移后的边界中")
+	var water_surface := arena.get_node_or_null("BossShallowWater/BossWaterSurface") as MeshInstance3D
+	_check(water_surface != null, "Boss 战生成浅水视觉表面")
+	_check(water_surface != null and water_surface.material_override is ShaderMaterial and (water_surface.material_override as ShaderMaterial).shader.resource_path == "res://materials/boss_water.gdshader", "Boss 浅水使用动态波纹材质")
+	_check(arena.get_node_or_null("BossShallowWater").find_children("*", "StaticBody3D", true, false).is_empty(), "Boss 浅水层不创建空气墙或地面碰撞")
 	_check(boss._character_visual.model_root.scene_file_path == player._character_visual.model_root.scene_file_path, "Boss 使用当前主角 GLB")
 	_check(boss._character_visual.skeleton != player._character_visual.skeleton, "Boss 和玩家拥有独立骨骼")
 	await _test_entrance()
@@ -149,11 +153,11 @@ func _test_shield_and_bounds() -> void:
 	boss.take_damage(7.0)
 	_check(is_equal_approx(boss.shield, 3.0) and is_equal_approx(boss.health, boss.max_health), "普通护盾真实吸收伤害")
 	boss.combat_enabled = false
-	boss.global_position.x = 1040.0
-	boss.global_position.z = 2040.0
+	var outside: Vector2 = arena.world_bounds().end + Vector2(2.0, 2.0)
+	boss.global_position.x = outside.x
+	boss.global_position.z = outside.y
 	boss._clamp_to_arena()
-	_check(is_equal_approx(boss.global_position.x, arena.world_bounds().end.x - boss.radius), "X 边界约束使用全局偏移")
-	_check(is_equal_approx(boss.global_position.z, arena.world_bounds().end.y - boss.radius), "Z 边界约束使用全局偏移")
+	_check(is_equal_approx(boss.global_position.x, outside.x) and is_equal_approx(boss.global_position.z, outside.y), "Boss 越过旧矩形范围时不会被空气墙拉回")
 
 
 func _reset_fixture() -> void:

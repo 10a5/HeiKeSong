@@ -1211,6 +1211,10 @@ func _build_model() -> void:
 	_heading.add_child(_body_pivot)
 	_character_visual = CHARACTER_VISUAL.new()
 	_character_visual.name = "TacticalFemaleVisual"
+	# The authored roundhouse clip reads more clearly than the generated low
+	# sweep on the current rig. Keep the gameplay card as `sweep`; this only
+	# changes the visual clip and leaves its damage/reach/timing untouched.
+	_character_visual.sweep_uses_front_kick_animation = true
 	_heading.add_child(_character_visual)
 
 	_add_capsule(_body_pivot, Vector3(0.0, 0.09, 0.0), 0.27, 0.69, _body_material)
