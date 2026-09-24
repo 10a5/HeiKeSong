@@ -8,17 +8,14 @@ const OVERLAY = preload("res://city_overlay.gd")
 const CATALOG = preload("res://card_catalog.gd")
 const EROSION = preload("res://erosion_system.gd")
 const BOSS_ARENA = preload("res://boss_arena.gd")
-<<<<<<< HEAD
 const FLOOR_ENDING = preload("res://floor_ending.gd")
 const LEVELS = preload("res://level_stats.gd")
+const ADAPTIVE_RUNTIME = preload("res://adaptive_boss_runtime.gd")
 
 ## Which authored floor this scene plays. The subclass scenes set this before
 ## `_ready()` runs; the value selects one row of `level_stats.gd`, which owns
 ## the map size, street enemy scaling and Boss health for that floor.
 @export var floor_index: int = LEVELS.FLOOR_ONE
-=======
-const ADAPTIVE_RUNTIME = preload("res://adaptive_boss_runtime.gd")
->>>>>>> ed32262 (9:01)
 
 var city_map: Node3D
 var services: Array[Node3D] = []
@@ -40,7 +37,6 @@ var _boss_transitioning := false
 var _boss_active := false
 var _boss_pending := false
 var _boss_transition_callback: Callable
-<<<<<<< HEAD
 var _boss_victory_reached := false
 ## The Boss-victory ending director (`floor_ending.gd`), live from the moment the
 ## mirror falls until the next floor takes the tree.
@@ -55,9 +51,7 @@ var _ending_arena_spawn := Vector3.ZERO
 ## Set once the victory Matrix fade has covered the screen, so the scene switch
 ## cannot run twice from a repeated death report.
 var _floor_complete := false
-=======
 var adaptive_runtime: Node
->>>>>>> ed32262 (9:01)
 
 
 func _ready() -> void:
@@ -161,14 +155,11 @@ func _create_environment() -> void:
 
 
 func regenerate_floor(seed_value: int = -1) -> void:
-<<<<<<< HEAD
 	# A retry must be able to interrupt the victory ending, which owns the
 	# camera, the environment and a hidden HUD while it plays.
 	_abort_boss_ending()
-=======
 	if is_instance_valid(adaptive_runtime):
 		adaptive_runtime.reset_run()
->>>>>>> ed32262 (9:01)
 	# R/N may interrupt the Boss Matrix fade before its one-shot `covered`
 	# callback runs. Disconnect it before reusing the same HUD transition node.
 	if is_instance_valid(hud) and is_instance_valid(hud.matrix_transition):
@@ -645,7 +636,6 @@ func _on_boss_erosion_depleted() -> void:
 	message("侵蚀耗尽 · 决战继续", false)
 
 
-<<<<<<< HEAD
 ## Victory rule. Beating the mirror Boss is what moves the run onward: the duel
 ## arena collapses, 素子 falls into the flooded basin, 雾子 is seen floating from
 ## above under the mirror quote, and a digital shop gate covers the switch to the
@@ -776,7 +766,6 @@ func _advance_now() -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file(next_scene)
 
-=======
 func _on_adaptive_runtime_status(message_text: String) -> void:
 	if not _boss_active or message_text.is_empty():
 		return
@@ -784,4 +773,3 @@ func _on_adaptive_runtime_status(message_text: String) -> void:
 	# HUD. The full status and model summary remain available on the runtime.
 	if message_text.contains("LLM") or message_text.contains("策略") or message_text.contains("失败"):
 		message("自适应 Boss · " + message_text, false)
->>>>>>> ed32262 (9:01)

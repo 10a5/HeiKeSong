@@ -28,7 +28,6 @@
 !.env.example
 !.env.sample
 
-<<<<<<< HEAD
 # --- Large binary assets not committed yet (kept out for repo size); ---
 # --- add them back per-pattern, ideally via Git LFS, when needed.      ---
 # NOTE: large assets already tracked by the shared repo are NOT listed here;
@@ -43,8 +42,7 @@
 /学校.glb.import
 /弹珠楼.glb.import
 /神社.glb.import
-=======
+
 # Local LLM credentials and per-machine model configuration.
 key.txt
 llm_config.local.json
->>>>>>> ed32262 (9:01)
