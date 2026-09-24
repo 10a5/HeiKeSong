@@ -4,6 +4,9 @@ extends SceneTree
 
 const PLAYER = preload("res://player.gd")
 const ENCOUNTER = preload("res://street_encounter.gd")
+## The city map owns the encounter plot, so its colour decision is checked here
+## rather than through a rendered overlay.
+const OVERLAY = preload("res://city_overlay.gd")
 
 class RewardReceiver extends Node:
 	var rewards := 0
@@ -101,24 +104,49 @@ func _test_boxer_line_of_sight() -> void:
 func _test_cloaked_encounter_marker(kind: StringName) -> void:
 	await _new_case(kind, Vector3(70.0, 0.0, 40.0))
 	var marker := encounter.get("_marker") as MeshInstance3D
+	var overlay := OVERLAY.new()
+	world.add_child(overlay)
 	await _steps(2)
 	_check(foe.is_optically_hidden() and is_instance_valid(marker) and not marker.visible, "%s's encounter ring does not expose its cloaked spawn" % kind)
+	# The city map plots encounter positions, so a concealed enemy has to opt out
+	# of it for the same reason its world ring stays hidden.
+	if kind == &"sniper":
+		_check(not bool(encounter.call("shows_on_city_map")), "A concealed sentry is left off the city map")
+		_check(overlay.call("encounter_map_color", encounter).a <= 0.0, "A concealed sentry plots no dot at all")
+	else:
+		_check(bool(encounter.call("shows_on_city_map")), "%s plots on the city map from the start" % kind)
+		_check(overlay.call("encounter_map_color", encounter).is_equal_approx(OVERLAY.DANGER), "%s keeps the red unfinished dot" % kind)
 	# Both player positions are inside the street trigger; the boxer charges
-	# from 4 m while the sniper begins its real aim from a valid 9 m range.
+	# from 4 m while the sniper fires from its own range at 9 m.
 	player.global_position = Vector3(4.0 if kind == &"boxer" else 9.0, 0.0, 0.0)
 	await _steps(3)
 	_check(encounter.state == &"active" and not foe.is_fully_revealed() and not marker.visible, "%s's encounter ring stays hidden throughout the first hologram phase" % kind)
-	_check(await _wait_for_enemy_revealed(75), "%s fully reveals during its real combat state" % kind)
-	await _steps(1)
-	_check(marker.visible, "%s's encounter ring appears after full reveal" % kind)
 	if kind == &"sniper":
-		_check(await _wait_for_enemy_state(&"sniper_cooldown", 150), "The encounter sniper reaches its cooldown")
-		_check(await _wait_for_enemy_hidden(60), "The encounter sniper completely disappears again")
+		# The sentry fires from concealment; only a hit drops its cloak, so the
+		# ring must stay hidden through a complete firing cycle.
+		_check(await _wait_for_enemy_state(&"sniper_cooldown", 150), "The encounter sniper fires without ever exposing itself")
+		_check(foe.is_optically_hidden() and not marker.visible, "The sniper ring stays hidden while the sentry shoots from concealment")
+		_check(not bool(encounter.call("shows_on_city_map")), "Firing does not put the sentry on the city map either")
+		_check(foe.take_damage(10.0), "The concealed sentry accepts the hit that exposes it")
+		_check(await _wait_for_enemy_revealed(75), "A hit reveals the encounter sniper")
 		await _steps(1)
-		_check(not marker.visible, "The sniper encounter ring disappears with its renewed cloak")
+		_check(marker.visible, "The sniper encounter ring appears once the sentry is exposed")
+		# Exposed but unfinished: now on the map, still the red unfinished dot.
+		_check(bool(encounter.call("shows_on_city_map")), "An exposed sentry is finally plotted on the city map")
+		_check(overlay.call("encounter_map_color", encounter).is_equal_approx(OVERLAY.DANGER), "An exposed sentry uses the red unfinished dot")
+	else:
+		_check(await _wait_for_enemy_revealed(75), "%s fully reveals during its real combat state" % kind)
+		await _steps(1)
+		_check(marker.visible, "%s's encounter ring appears after full reveal" % kind)
 	_check(foe.take_damage(1000.0), "%s can be defeated while its encounter controls the marker" % kind)
 	await _steps(1)
 	_check(encounter.state == &"cleared" and marker.visible, "%s's cleared encounter marker appears even if the enemy was cloaked" % kind)
+	_check(overlay.call("encounter_map_color", encounter).is_equal_approx(OVERLAY.TEAL), "%s leaves the cyan cleared dot on the city map" % kind)
+	# The world ring has to match that map dot, so a beaten sniper nest reads as
+	# a finished cyan point in the street and on the overview map alike.
+	var cleared_material := marker.material_override as StandardMaterial3D
+	_check(cleared_material != null and cleared_material.albedo_color.is_equal_approx(ENCOUNTER.CLEARED_MARKER_COLOR), "%s's cleared ring uses the cyan completion colour" % kind)
+	_check(cleared_material != null and cleared_material.emission_enabled and cleared_material.emission.is_equal_approx(ENCOUNTER.CLEARED_MARKER_EMISSION), "%s's cleared ring emits cyan light as a finished point" % kind)
 
 
 func _test_disengage_and_resume(kind: StringName) -> void:
@@ -145,7 +173,7 @@ func _test_disengage_and_resume(kind: StringName) -> void:
 	_check(_horizontal_distance(foe.global_position, stopped_at) < 0.01, "%s stops at its current location without an extra movement frame" % kind)
 	await _steps(135)
 	_check(_horizontal_distance(foe.global_position, stopped_at) < 0.01 and _horizontal_distance(foe.global_position, foe.spawn_position) > 1.0, "%s stays at its stopped position instead of returning to spawn" % kind)
-	_check(is_equal_approx(float(foe.health), 83.0), "%s keeps its remaining health while out of combat" % kind)
+	_check(is_equal_approx(float(foe.health), float(foe.max_health) - 17.0), "%s keeps its remaining health while out of combat" % kind)
 	_check(is_equal_approx(float(player.health), health_before), "%s cannot finish a cancelled strike or shot after disengagement" % kind)
 	if kind == &"sniper":
 		player.global_position = stopped_at + Vector3(3.0, 0.0, 0.0)
@@ -156,8 +184,17 @@ func _test_disengage_and_resume(kind: StringName) -> void:
 		player.global_position = stopped_at + Vector3(-4.0, 0.0, 0.0)
 	await _steps(3)
 	_check(encounter.state == &"active" and foe.combat_enabled, "%s resumes combat when the player returns" % kind)
-	_check(foe.state == &"chase" and Vector2(foe.velocity.x, foe.velocity.z).length() > 0.1, "%s moves again from the location where it disengaged" % kind)
-	_check(_horizontal_distance(foe.global_position, stopped_at) > 0.03 and is_equal_approx(float(foe.health), 83.0), "%s resumes without teleporting or restoring health" % kind)
+	if kind == &"sniper":
+		# A sentry never walks, and the wound it took before disengaging holds
+		# the rifle: the lockout is a property of the weapon, so it keeps running
+		# through disengagement and then lets the sentry re-arm in place.
+		_check(bool(foe.call("is_suppressed")), "The pre-disengagement wound still holds the sniper's trigger")
+		_check(await _wait_for_enemy_state(&"sniper_aim", 240), "The sniper re-arms from its nest once the lockout expires")
+		_check(Vector2(foe.velocity.x, foe.velocity.z).length() < 0.01, "The sniper re-arms without walking")
+		_check(_horizontal_distance(foe.global_position, stopped_at) < 0.01 and is_equal_approx(float(foe.health), float(foe.max_health) - 17.0), "The sniper resumes without moving or restoring health")
+	else:
+		_check(foe.state == &"chase" and Vector2(foe.velocity.x, foe.velocity.z).length() > 0.1, "%s moves again from the location where it disengaged" % kind)
+		_check(_horizontal_distance(foe.global_position, stopped_at) > 0.03 and is_equal_approx(float(foe.health), float(foe.max_health) - 17.0), "%s resumes without teleporting or restoring health" % kind)
 	_check(foe.take_damage(1000.0), "%s can be defeated after re-engagement" % kind)
 	_check(not foe.take_damage(1000.0), "%s rejects a duplicate lethal hit" % kind)
 	await _steps(2)

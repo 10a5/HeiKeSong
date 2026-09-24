@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cx4xfrgcdy04g"
-path="res://.godot/imported/医疗点_医疗点_basecolor.jpg-15bf2cdcc9121520dd93debc2408567c.ctex"
+path.s3tc="res://.godot/imported/医疗点_医疗点_basecolor.jpg-15bf2cdcc9121520dd93debc2408567c.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "a9b63e4626ab56ac8f8a0e7d18213224"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://model/医疗点_医疗点_basecolor.jpg"
-dest_files=["res://.godot/imported/医疗点_医疗点_basecolor.jpg-15bf2cdcc9121520dd93debc2408567c.ctex"]
+dest_files=["res://.godot/imported/医疗点_医疗点_basecolor.jpg-15bf2cdcc9121520dd93debc2408567c.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

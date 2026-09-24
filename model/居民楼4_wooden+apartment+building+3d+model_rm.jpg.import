@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://ceiu0phcm2lda"
-path="res://.godot/imported/居民楼4_wooden+apartment+building+3d+model_rm.jpg-aff56022a73c97a301f616adfcc54c32.ctex"
+path.s3tc="res://.godot/imported/居民楼4_wooden+apartment+building+3d+model_rm.jpg-aff56022a73c97a301f616adfcc54c32.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "e7e3ed01384201eca7388f7aeb96ed6b"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://model/居民楼4_wooden+apartment+building+3d+model_rm.jpg"
-dest_files=["res://.godot/imported/居民楼4_wooden+apartment+building+3d+model_rm.jpg-aff56022a73c97a301f616adfcc54c32.ctex"]
+dest_files=["res://.godot/imported/居民楼4_wooden+apartment+building+3d+model_rm.jpg-aff56022a73c97a301f616adfcc54c32.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

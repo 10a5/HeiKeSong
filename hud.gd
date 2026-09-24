@@ -24,6 +24,9 @@ const EROSION_BAR := Rect2(20.0, 202.0, 174.0, 5.0)
 const BOSS_PANEL := Rect2(320.0, 44.0, 320.0, 70.0)
 const BOSS_HEALTH_BAR := Rect2(328.0, 70.0, 304.0, 5.0)
 const BOSS_ENERGY_BAR := Rect2(328.0, 100.0, 304.0, 3.0)
+## Persistent danger prompt (for example a concealed sniper's firing range).
+## Sits between the Boss panel and the deck so it never covers either.
+const THREAT_BANNER := Rect2(300.0, 130.0, 360.0, 48.0)
 const CARD_SIZE := Vector2(100.0, 80.0)
 const CARD_GAP := 8.0
 const HAND_ORIGIN := Vector2(268.0, 424.0)
@@ -98,6 +101,10 @@ var _boss_shield := 0.0
 var _boss_entrance_time_left := 0.0
 var _boss_defeated := false
 var _boss_display_name := "镜像 Boss"
+var _threat_message := ""
+var _threat_active := false
+var _threat_hint := "寻找掩体或翻滚闪避 · 命中它才会显形"
+var _threat_pulse := 0.0
 
 
 func _ready() -> void:
@@ -124,6 +131,7 @@ func setup(actor: CharacterBody3D, card_deck: Node) -> void:
 	_disconnect_signal(player, "shield_changed", _on_shield_changed)
 	_disconnect_signal(player, "damaged", _on_damaged)
 	_disconnect_signal(player, "defeated", _on_defeated)
+	_disconnect_signal(player, "threat_changed", _on_threat_changed)
 	_disconnect_signal(deck, "piles_changed", _on_piles_changed)
 	_disconnect_signal(deck, "card_drawn", _on_card_drawn)
 	_disconnect_signal(deck, "card_discarded", _on_card_discarded)
@@ -135,6 +143,9 @@ func setup(actor: CharacterBody3D, card_deck: Node) -> void:
 	last_action_time = -1.0
 	status_text = "选择手牌"
 	status_is_error = false
+	_threat_message = ""
+	_threat_active = false
+	_threat_pulse = 0.0
 	_cybernetic_time_left = 0.0
 	_cybernetic_cooldown_left = 0.0
 	_cybernetic_active = false
@@ -162,6 +173,10 @@ func setup(actor: CharacterBody3D, card_deck: Node) -> void:
 			player.connect("damaged", _on_damaged)
 		if player.has_signal("defeated"):
 			player.connect("defeated", _on_defeated)
+		if player.has_signal("threat_changed"):
+			player.connect("threat_changed", _on_threat_changed)
+			var threat: String = String(player.call("active_threat_message")) if player.has_method("active_threat_message") else ""
+			set_threat_warning(threat, not threat.is_empty())
 		_on_energy_changed(float(player.get("energy")), float(player.get("max_energy")))
 		_sync_cybernetic_state()
 	if is_instance_valid(deck):
@@ -249,6 +264,16 @@ func set_location(title: String, subtitle: String, reset_text: String) -> void:
 	_labels["pause_hint"].text = "按 ESC 继续  /  按 R 重新开始"
 
 
+## Read-back of the district line for tests and floor-navigation code, so the
+## label text can be asserted without reaching into the private label table.
+func get_location_title() -> String:
+	return _labels["title"].text if _labels.has("title") else ""
+
+
+func get_location_subtitle() -> String:
+	return _labels["subtitle"].text if _labels.has("subtitle") else ""
+
+
 func set_defeat_text(main_text: String, hint: String) -> void:
 	if not _labels.has("defeat"):
 		return
@@ -275,9 +300,45 @@ func set_boss_target(target: Node) -> void:
 	queue_redraw()
 
 
+## Show or clear the persistent danger banner. The actor side aggregates its
+## sources and only reports the summary, so this stays a plain setter.
+func set_threat_warning(message: String, active: bool) -> void:
+	if message == _threat_message and active == _threat_active:
+		return
+	_threat_message = message
+	_threat_active = active
+	if not active:
+		_threat_pulse = 0.0
+	_update_threat_labels()
+	queue_redraw()
+
+
+func is_threat_warning_active() -> bool:
+	return _threat_active
+
+
+func _on_threat_changed(message: String, active: bool) -> void:
+	set_threat_warning(message, active)
+
+
+func _update_threat_labels() -> void:
+	if not _labels.has("threat_title"):
+		return
+	_labels["threat_title"].visible = _threat_active
+	_labels["threat_hint"].visible = _threat_active
+	if not _threat_active:
+		return
+	_labels["threat_title"].text = _threat_message
+	_labels["threat_hint"].text = _threat_hint
+
+
 func _process(delta: float) -> void:
 	_sync_cybernetic_state()
 	_sync_boss_state()
+	if _threat_active:
+		_threat_pulse += delta
+	else:
+		_threat_pulse = 0.0
 	if not paused:
 		if last_action_time >= 0.0:
 			last_action_time += delta
@@ -456,6 +517,10 @@ func _create_interface() -> void:
 	_add_label("cybernetic_title", "爆发加速", Vector2(775, 18), 14, TEXT)
 	_add_label("cybernetic_state", "可用 · 按 Q 激活", Vector2(775, 38), 10, TEAL)
 	_add_label("cybernetic_hint", "", Vector2(744, 64), 9, TEXT)
+	var threat_title := _center_label("threat_title", "", Rect2(THREAT_BANNER.position + Vector2(0, 7), Vector2(THREAT_BANNER.size.x, 22)), 15, RED)
+	threat_title.visible = false
+	var threat_hint := _center_label("threat_hint", _threat_hint, Rect2(THREAT_BANNER.position + Vector2(0, 29), Vector2(THREAT_BANNER.size.x, 14)), 9, TEXT)
+	threat_hint.visible = false
 
 	_add_label("energy_title", "中枢能量", Vector2(268, 512), 10, TEXT)
 	_add_label("energy_value", "10.0 / 10.0", Vector2(323, 509), 13, TEXT)
@@ -583,6 +648,7 @@ func _update_dynamic_labels() -> void:
 	_update_cybernetic_labels()
 	_update_erosion_labels()
 	_update_boss_labels()
+	_update_threat_labels()
 
 
 func _update_erosion_labels() -> void:
@@ -882,6 +948,7 @@ func _draw() -> void:
 	_draw_shield_bar()
 	_draw_erosion_bar()
 	_draw_boss_panel()
+	_draw_threat_banner()
 	_draw_energy_bar()
 	_draw_pile(DRAW_PILE, TEAL, _pile_count("draw_pile"), _draw_flash)
 	_draw_pile(DISCARD_PILE, PURPLE, _pile_count("discard_pile"), _discard_flash)
@@ -936,6 +1003,18 @@ func _draw_boss_panel() -> void:
 	draw_rect(BOSS_ENERGY_BAR, Color(GRID, 0.8))
 	if _boss_energy > 0.0:
 		draw_rect(Rect2(BOSS_ENERGY_BAR.position, Vector2(BOSS_ENERGY_BAR.size.x * _boss_energy / _boss_max_energy, BOSS_ENERGY_BAR.size.y)), TEAL)
+
+
+## A pulsing red band is the only screen-space cue that an unseen rifle is
+## already covering the player, so it stays readable without covering the arena.
+func _draw_threat_banner() -> void:
+	if not _threat_active:
+		return
+	var pulse := 0.62 + 0.38 * sin(_threat_pulse * 5.2)
+	draw_rect(THREAT_BANNER, Color(BG, 0.82))
+	draw_rect(THREAT_BANNER, Color(RED, 0.22 + 0.28 * pulse))
+	draw_rect(THREAT_BANNER, Color(RED, 0.45 + 0.45 * pulse), false, 1.0)
+	draw_rect(Rect2(THREAT_BANNER.position, Vector2(3.0, THREAT_BANNER.size.y)), Color(RED, 0.6 + 0.4 * pulse))
 
 
 func _draw_damage_edges() -> void:

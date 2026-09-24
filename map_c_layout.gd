@@ -6,7 +6,11 @@ class_name MapCLayout
 ## (x, y) to Godot's XZ plane with Vector3(x, height, -y).
 
 const EPS := 0.000001
-const MAP_BOUNDS := Rect2(0.0, 0.0, 100.0, 100.0)
+## Floor one's square planning area. Larger floors pass `options["map_size"]`
+## to `plan()` instead of editing this default, so the growth rules themselves
+## stay identical and only the available area changes.
+const MAP_SIZE := 100.0
+const MAP_BOUNDS := Rect2(0.0, 0.0, MAP_SIZE, MAP_SIZE)
 const MAIN_ANGLE := deg_to_rad(68.0)
 const MAIN_WIDTH := 10.0
 const BRANCH_WIDTH := 4.0
@@ -26,6 +30,9 @@ const HASH_CELL := 12.0
 
 var _rng := RandomNumberGenerator.new()
 var _seed := 0
+## Planning rectangle for this run. Defaults to the first floor's 100 x 100
+## square and is replaced by `options["map_size"]` for later, larger floors.
+var _bounds := MAP_BOUNDS
 var _roads: Array[Dictionary] = []
 var _road_anchors: Array[Dictionary] = []
 var _house_anchors: Array[Dictionary] = []
@@ -49,6 +56,10 @@ func plan(seed_value: int, templates: Array[Dictionary] = [], options: Dictionar
 	var started_ms := Time.get_ticks_msec()
 	_seed = seed_value
 	_rng.seed = seed_value
+	# A bigger floor keeps every planning rule (road angle, widths, setback,
+	# house gap, growth order) and only widens the square the city grows into.
+	var requested_size := float(options.get("map_size", MAP_SIZE))
+	_bounds = Rect2(0.0, 0.0, maxf(requested_size, 20.0), maxf(requested_size, 20.0))
 	_reset(templates)
 	_build_roads()
 	var failure_streak := 0
@@ -104,9 +115,10 @@ func _reset(input_templates: Array[Dictionary]) -> void:
 
 
 func _build_roads() -> void:
-	var reference := Vector2(50.0, 50.0) + Vector2(_rng.randf_range(-6.0, 6.0), _rng.randf_range(-6.0, 6.0))
+	var center := _bounds.get_center()
+	var reference := center + Vector2(_rng.randf_range(-6.0, 6.0), _rng.randf_range(-6.0, 6.0))
 	var main_direction := Vector2(cos(MAIN_ANGLE), sin(MAIN_ANGLE))
-	var main_line := _line_through_rect(reference, main_direction, MAP_BOUNDS)
+	var main_line := _line_through_rect(reference, main_direction, _bounds)
 	_add_road("main", MAIN_WIDTH, main_line[0], main_line[1])
 	var main_a: Vector2 = main_line[0]
 	var main_b: Vector2 = main_line[1]
@@ -121,7 +133,7 @@ func _build_roads() -> void:
 			var delta_angle := _rng.randf_range(-BRANCH_ANGLE_JITTER, BRANCH_ANGLE_JITTER)
 			var branch_angle: float = MAIN_ANGLE + float(side) * (PI * 0.5 + deg_to_rad(delta_angle))
 			var direction := Vector2(cos(branch_angle), sin(branch_angle)).normalized()
-			var available := _ray_to_rect(start, direction, MAP_BOUNDS)
+			var available := _ray_to_rect(start, direction, _bounds)
 			var ratio := _weighted_choice(length_ratios, length_weights)
 			var finish := start + direction * available * ratio
 			_add_road("branch_%d" % branch_index, BRANCH_WIDTH, start, finish)
@@ -259,7 +271,7 @@ func _place_from_anchor(anchor: Dictionary, offset: float, width: float, depth: 
 
 func _is_valid_house(polygon: PackedVector2Array) -> bool:
 	for point: Vector2 in polygon:
-		if point.x < MAP_BOUNDS.position.x - EPS or point.y < MAP_BOUNDS.position.y - EPS or point.x > MAP_BOUNDS.end.x + EPS or point.y > MAP_BOUNDS.end.y + EPS:
+		if point.x < _bounds.position.x - EPS or point.y < _bounds.position.y - EPS or point.x > _bounds.end.x + EPS or point.y > _bounds.end.y + EPS:
 			return false
 	for road: Dictionary in _roads:
 		if _polygons_within_distance(polygon, road["polygon"], ROAD_SETBACK - EPS):
@@ -527,15 +539,15 @@ func _clip_polygon_to_bounds(polygon: PackedVector2Array) -> PackedVector2Array:
 
 func _inside_boundary(point: Vector2, boundary: int) -> bool:
 	match boundary:
-		0: return point.x >= MAP_BOUNDS.position.x - EPS
-		1: return point.x <= MAP_BOUNDS.end.x + EPS
-		2: return point.y >= MAP_BOUNDS.position.y - EPS
-		_: return point.y <= MAP_BOUNDS.end.y + EPS
+		0: return point.x >= _bounds.position.x - EPS
+		1: return point.x <= _bounds.end.x + EPS
+		2: return point.y >= _bounds.position.y - EPS
+		_: return point.y <= _bounds.end.y + EPS
 
 
 func _boundary_intersection(a: Vector2, b: Vector2, boundary: int) -> Vector2:
 	var axis := 0 if boundary < 2 else 1
-	var value := MAP_BOUNDS.position[axis] if boundary == 0 or boundary == 2 else MAP_BOUNDS.end[axis]
+	var value := _bounds.position[axis] if boundary == 0 or boundary == 2 else _bounds.end[axis]
 	var delta := b[axis] - a[axis]
 	if absf(delta) <= EPS:
 		return a
@@ -579,7 +591,7 @@ func _result() -> Dictionary:
 	return {
 		"map_id": "C",
 		"seed": _seed,
-		"bounds": MAP_BOUNDS,
+		"bounds": _bounds,
 		"roads": _roads.duplicate(true),
 		"houses": _houses.duplicate(true),
 		"anchors": {"road": _road_anchors.duplicate(true), "house": _house_anchors.duplicate(true)},

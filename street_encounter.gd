@@ -3,6 +3,11 @@ extends Node3D
 ## that edge before disengaging at its own detection limit.
 
 const VARIANT_ENEMY = preload("res://enemy_variant.gd")
+## Cyan completion colour for a finished encounter. The same value is used by
+## the world ring below and by the city map's cleared dot, so "sniper nest
+## cleared" reads identically in the street and on the overview map.
+const CLEARED_MARKER_COLOR := Color("42f6e0")
+const CLEARED_MARKER_EMISSION := Color("16d9d0")
 var state: StringName = &"dormant"
 var foe: CharacterBody3D
 var data: Dictionary = {}
@@ -33,6 +38,13 @@ func setup(edge: Dictionary, actor: CharacterBody3D, controller: Node) -> void:
 	foe = VARIANT_ENEMY.new()
 	foe.name = "StreetGuard_%s" % String(enemy_type)
 	foe.configure_variant(enemy_type)
+	# Per-floor scaling is applied before the foe enters the tree so its very
+	# first reset already carries the scaled pool. The defaults keep every other
+	# caller at the first floor's street numbers.
+	var health_scale := float(data.get("enemy_health_multiplier", 1.0))
+	var damage_scale := float(data.get("enemy_damage_multiplier", 1.0))
+	if foe.has_method("apply_stat_multipliers"):
+		foe.apply_stat_multipliers(health_scale, damage_scale)
 	foe.spawn_position = global_position
 	foe.combat_enabled = false
 	add_child(foe)
@@ -62,7 +74,8 @@ func _physics_process(_delta: float) -> void:
 		_end_combat()
 		return
 	var is_boxer: bool = foe.get_variant_kind() == &"boxer"
-	var nearby := _boxer_can_engage() if is_boxer else _player_on_street()
+	var is_sniper: bool = foe.get_variant_kind() == &"sniper"
+	var nearby := _sniper_can_engage() if is_sniper else (_boxer_can_engage() if is_boxer else _player_on_street())
 	if state == &"dormant" and nearby:
 		state = &"active"
 		_material.albedo_color = Color("fb8966")
@@ -71,9 +84,9 @@ func _physics_process(_delta: float) -> void:
 	foe.combat_enabled = nearby and state == &"active"
 	# No transform writes on disengagement. A boxer can leave its original
 	# segment to close its full detection distance; move_and_slide still keeps
-	# it outside solid buildings. Other roles keep their existing street bounds
-	# only while fighting, never as a teleport when combat ends.
-	if not foe.combat_enabled or is_boxer:
+	# it outside solid buildings. The sniper never leaves its nest, so clamping
+	# it to a street rectangle would only fight the sentry controller.
+	if not foe.combat_enabled or is_boxer or is_sniper:
 		return
 	var guard_offset := foe.global_position - global_position
 	var guard_along := clampf(guard_offset.dot(_axis), -_half_length + 0.6, _half_length - 0.6)
@@ -89,6 +102,22 @@ func _sync_marker_visibility() -> void:
 	# The fixed street marker must not disclose a concealed enemy's spawn point.
 	if is_instance_valid(_marker):
 		_marker.visible = state == &"cleared" or (is_instance_valid(foe) and foe.is_fully_revealed())
+
+
+## Whether the city map may plot this encounter's position. A sniper sentry
+## answers no while it is still under its optical cloak: its dot would hand the
+## player exactly the nest the cloak exists to hide. A hit that exposes it also
+## puts it on the map — red while the encounter is unfinished, and the ordinary
+## cyan cleared dot once it is defeated. The 遭遇 n/8 counter always tracks it.
+func shows_on_city_map() -> bool:
+	if not is_instance_valid(foe):
+		return true
+	# A finished encounter always belongs on the map, whatever killed it.
+	if state == &"cleared":
+		return true
+	if not foe.has_method("is_permanently_revealed"):
+		return true
+	return bool(foe.call("is_permanently_revealed"))
 
 
 func _player_on_street() -> bool:
@@ -119,11 +148,34 @@ func _boxer_can_engage() -> bool:
 	return get_world_3d().direct_space_state.intersect_ray(ray).is_empty()
 
 
+func _sniper_can_engage() -> bool:
+	# The sentry never leaves its nest, so its own firing range — not the old
+	# street rectangle — decides when it wakes. That is deliberately the same
+	# number the controller uses for the range prompt, so the warning appears
+	# exactly when the rifle is armed, never earlier and never without a threat.
+	# Beyond it the encounter keeps a short leash band so pacing on the boundary
+	# cannot flicker the prompt.
+	var offset := _actor.global_position - foe.global_position
+	var distance := Vector2(offset.x, offset.z).length()
+	var max_range: float = float(foe.aggro_range if state == &"active" else foe.sniper_max_distance)
+	if absf(offset.y) >= 2.6 or distance > max_range:
+		return false
+	if state == &"active":
+		return true
+	var ray := PhysicsRayQueryParameters3D.create(
+		foe.global_position + Vector3.UP * 1.0,
+		_actor.global_position + Vector3.UP * 1.0, 1
+	)
+	ray.exclude = [foe.get_rid(), _actor.get_rid()]
+	return get_world_3d().direct_space_state.intersect_ray(ray).is_empty()
+
+
 func _end_combat() -> void:
 	if state == &"active" or foe.combat_enabled:
 		foe.disengage()
 	state = &"dormant"
 	_material.albedo_color = Color("d6a361")
+	_material.emission_enabled = false
 
 
 func _on_cleared() -> void:
@@ -131,7 +183,13 @@ func _on_cleared() -> void:
 		return
 	state = &"cleared"
 	foe.combat_enabled = false
-	_material.albedo_color = Color("78cfb1")
+	# A defeated sentry leaves a cyan "already cleared" point on the map. The
+	# world ring and the city-map dot share this colour, so a sniper nest the
+	# player has beaten reads as finished instead of as an open threat.
+	_material.albedo_color = CLEARED_MARKER_COLOR
+	_material.emission_enabled = true
+	_material.emission = CLEARED_MARKER_EMISSION
+	_material.emission_energy_multiplier = 2.4
 	_sync_marker_visibility()
 	# The floor awards credits and opens the one-time Matrix reward choice.
 	# Passing this encounter lets the floor derive a stable seed for its drop.

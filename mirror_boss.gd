@@ -12,6 +12,13 @@ signal combo_finished(combo_name: StringName)
 const ROLL_PUNCHES: StringName = &"roll_punches"
 const DASH_KICK: StringName = &"dash_kick"
 const ENTRANCE_SHADER = preload("res://materials/boss_entrance.gdshader")
+## Authored duel numbers, identical to the values the lab fighter always had.
+## `_apply_floor_scaling()` multiplies these by the current floor's multipliers
+## instead of editing them, so floor one's duel is numerically unchanged.
+const AUTHORED_MAX_HEALTH: float = 500.0
+const AUTHORED_SLASH_DAMAGE: float = 12.0
+const AUTHORED_DASH_SLASH_DAMAGE: float = 18.0
+const AUTHORED_FRONT_KICK_DAMAGE: float = 15.0
 
 @export_group("Mirror Boss")
 @export var display_name: String = "镜像 Boss"
@@ -35,6 +42,18 @@ const ENTRANCE_SHADER = preload("res://materials/boss_entrance.gdshader")
 ## Optional circular boundary, in addition to the inherited rectangular bounds.
 @export var arena_center: Vector3 = Vector3.ZERO
 @export var arena_radius: float = 0.0
+## Per-floor tuning. The duel is otherwise identical on every floor: same
+## combos, telegraphs, energy economy and card effects. Later floors make the
+## mirror's health pool thicker and its landed hits hurt more; both are applied
+## once in `_init()` from these fields, and `set_floor_scaling()` lets the arena
+## override them before the boss enters the tree. A zero or negative value is
+## treated as "leave the authored number alone".
+@export var health_multiplier: float = 1.0
+@export var damage_multiplier: float = 1.0
+
+## Health pool authored by `_init()`, before any floor multiplier. Retained so
+## the duel can be re-scaled repeatedly without compounding.
+var base_max_health: float = 500.0
 
 var combat_enabled: bool = true:
 	set(value):
@@ -79,18 +98,46 @@ var _entrance_ring_material: StandardMaterial3D
 
 
 func _init() -> void:
-	max_health = 500.0
+	base_max_health = AUTHORED_MAX_HEALTH
+	max_health = base_max_health
 	move_speed = 3.2
 	max_energy = 10.0
 	energy_regen_per_second = 2.0
 	# The same moves have lower training damage to leave room to observe a full
 	# sequence and answer it. All damage remains editable in the inspector.
-	slash_damage = 12.0
-	dash_slash_damage = 18.0
-	front_kick_damage = 15.0
+	slash_damage = AUTHORED_SLASH_DAMAGE
+	dash_slash_damage = AUTHORED_DASH_SLASH_DAMAGE
+	front_kick_damage = AUTHORED_FRONT_KICK_DAMAGE
 	# Keep the protected lab fighter's shield lifetime. The live player's
 	# shield decay was shortened independently after the lab was created.
 	shield_decay_interval = 0.5
+	_apply_floor_scaling()
+
+
+## Floor scaling hook for the arena. Values are applied in `_init()` from the
+## exported fields, so the arena can also set them before `add_child()` and the
+## protected entrance, HUD bars and first `reset_enemy()` all use the scaled
+## pool instead of the unscaled 500.
+func set_floor_scaling(health_scale: float, damage_scale: float) -> void:
+	if health_scale > 0.0:
+		health_multiplier = health_scale
+	if damage_scale > 0.0:
+		damage_multiplier = damage_scale
+	_apply_floor_scaling()
+
+
+func _apply_floor_scaling() -> void:
+	var health_scale := health_multiplier if health_multiplier > 0.0 else 1.0
+	var damage_scale := damage_multiplier if damage_multiplier > 0.0 else 1.0
+	# Re-derive every value from the authored base so repeated calls never
+	# compound, whether they come from `_init()` or from the arena.
+	max_health = AUTHORED_MAX_HEALTH * health_scale
+	slash_damage = AUTHORED_SLASH_DAMAGE * damage_scale
+	dash_slash_damage = AUTHORED_DASH_SLASH_DAMAGE * damage_scale
+	front_kick_damage = AUTHORED_FRONT_KICK_DAMAGE * damage_scale
+	# The duel always starts from a full pool; `reset_player()` refills it again
+	# on every retry, and the HUD reads `max_health` for its bar length.
+	health = max_health
 
 
 func _ready() -> void:

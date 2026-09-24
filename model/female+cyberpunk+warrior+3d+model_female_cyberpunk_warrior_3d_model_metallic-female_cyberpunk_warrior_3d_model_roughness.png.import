@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://4bbvnhnqlq3h"
-path="res://.godot/imported/female+cyberpunk+warrior+3d+model_female_cyberpunk_warrior_3d_model_metallic-female_cyberpunk_warrior_3d_model_roughness.png-1feee454572d6f9636f6f34bbe988a18.ctex"
+path.s3tc="res://.godot/imported/female+cyberpunk+warrior+3d+model_female_cyberpunk_warrior_3d_model_metallic-female_cyberpunk_warrior_3d_model_roughness.png-1feee454572d6f9636f6f34bbe988a18.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "b56fcdeee6829152c11de6dd7140cbf1"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://model/female+cyberpunk+warrior+3d+model_female_cyberpunk_warrior_3d_model_metallic-female_cyberpunk_warrior_3d_model_roughness.png"
-dest_files=["res://.godot/imported/female+cyberpunk+warrior+3d+model_female_cyberpunk_warrior_3d_model_metallic-female_cyberpunk_warrior_3d_model_roughness.png-1feee454572d6f9636f6f34bbe988a18.ctex"]
+dest_files=["res://.godot/imported/female+cyberpunk+warrior+3d+model_female_cyberpunk_warrior_3d_model_metallic-female_cyberpunk_warrior_3d_model_roughness.png-1feee454572d6f9636f6f34bbe988a18.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

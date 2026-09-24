@@ -15,10 +15,25 @@ const SURFACE_RAY_UP: float = 50.0
 const SURFACE_RAY_DOWN: float = 20.0
 
 @export var arena_rect := Rect2(-19.0, -15.0, 38.0, 30.0)
+## Per-floor duel tuning, forwarded to the mirror Boss when it is created.
+## Floor one keeps 1.0 / 1.0 and therefore the authored 500 HP duel; later
+## floors raise both so the mirror's health pool and landed hits grow while
+## every combo, telegraph and card effect stays the same.
+@export var boss_health_multiplier: float = 1.0
+@export var boss_damage_multiplier: float = 1.0
 
 var arena: Node3D
 var boss: CharacterBody3D
 var water: Node3D
+
+
+## Must be called before `spawn_boss()`. The values also drive a live boss so a
+## floor can retune an arena that is already standing.
+func set_floor_scaling(health_scale: float, damage_scale: float) -> void:
+	boss_health_multiplier = health_scale if health_scale > 0.0 else 1.0
+	boss_damage_multiplier = damage_scale if damage_scale > 0.0 else 1.0
+	if is_instance_valid(boss) and boss.has_method("set_floor_scaling"):
+		boss.call("set_floor_scaling", boss_health_multiplier, boss_damage_multiplier)
 
 
 func _ready() -> void:
@@ -85,6 +100,11 @@ func spawn_boss(player: CharacterBody3D) -> CharacterBody3D:
 	boss = BOSS_SCRIPT.new()
 	boss.name = "MirrorBoss"
 	boss.display_name = "镜像 Boss"
+	# Scale before `add_child()`: the mirror derives its pool and damage in
+	# `_init()`, so setting this afterwards would leave the first entrance and
+	# the HUD bar on the unscaled 500.
+	if boss.has_method("set_floor_scaling"):
+		boss.call("set_floor_scaling", boss_health_multiplier, boss_damage_multiplier)
 	boss.spawn_position = surface_point(0.0, -1.0)
 	boss.arena_rect = world_bounds()
 	boss.arena_center = global_position

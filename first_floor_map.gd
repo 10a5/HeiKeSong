@@ -3,6 +3,9 @@ extends Node3D
 ## Imported building footprints have a six-metre short side, with uniform scale.
 
 const MAP_LAYOUT = preload("res://map_c_layout.gd")
+## First floor's square size. Later floors assign `map_size` before `generate()`
+## so the same growth algorithm plans a larger district; every derived extent
+## below is recomputed from it.
 const MAP_SIZE := 100.0
 const BUILDING_SHORT_SIDE := 6.0
 const STREET_WIDTH := 10.0
@@ -10,8 +13,6 @@ const SHALLOW_MARGIN_X := 18.0
 const SHALLOW_MARGIN_Z := 18.0
 const DEEP_WIDTH := 100.0
 const WATER_HEIGHT := -0.12
-const LAND_HALF_EXTENT_X := MAP_SIZE * 0.5
-const LAND_HALF_EXTENT_Z := MAP_SIZE * 0.5
 const KIND_COLORS := {
 	"residential": Color("a4afb7"),
 	"shop": Color("e9b866"),
@@ -60,7 +61,17 @@ const CAMERA_OCCLUSION_MASK := 1 << 3
 const OCCLUSION_REQUIRED_SAMPLES := 5
 
 var seed_value: int = 104729
-var land_rect := Rect2(-LAND_HALF_EXTENT_X, -LAND_HALF_EXTENT_Z, LAND_HALF_EXTENT_X * 2.0, LAND_HALF_EXTENT_Z * 2.0)
+## Planning square edge in metres. Floor one keeps 100; the second and third
+## floors raise it, which lengthens roads and grows more houses along them.
+var map_size: float = MAP_SIZE
+## Per-floor street enemy scaling, stamped onto every generated encounter and
+## forwarded by `street_encounter.gd`. Floor one keeps 1.0 / 1.0.
+var enemy_health_multiplier: float = 1.0
+var enemy_damage_multiplier: float = 1.0
+## Optional explicit encounter count. Zero (the default) derives the count from
+## the map area, which reproduces floor one's eight encounters at 100 x 100.
+var encounter_target: int = 0
+var land_rect := Rect2(-MAP_SIZE * 0.5, -MAP_SIZE * 0.5, MAP_SIZE, MAP_SIZE)
 var shallow_rect := Rect2(land_rect.position - Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z), land_rect.size + Vector2(SHALLOW_MARGIN_X, SHALLOW_MARGIN_Z) * 2.0)
 var world_rect := shallow_rect.grow(DEEP_WIDTH)
 var spawn_position := Vector3.ZERO
@@ -108,13 +119,14 @@ func generate(new_seed_value: int = 104729) -> void:
 	_prepare_building_models()
 	building_templates = _build_model_templates()
 	var planner = MAP_LAYOUT.new()
-	map_plan = planner.plan(seed_value, building_templates)
+	map_plan = planner.plan(seed_value, building_templates, {"map_size": map_size})
 	goal_position = _layout_point_to_world(map_plan["goal"])
 	spawn_position = _layout_point_to_world(map_plan["start"])
 	var main_direction := (goal_position - spawn_position).normalized()
 	spawn_position += main_direction * 5.0
 	goal_position -= main_direction * 5.0
-	land_rect = Rect2(-MAP_SIZE * 0.5, -MAP_SIZE * 0.5, MAP_SIZE, MAP_SIZE)
+	var half_extent := map_size * 0.5
+	land_rect = Rect2(-half_extent, -half_extent, map_size, map_size)
 	shallow_rect = land_rect.grow(SHALLOW_MARGIN_X)
 	world_rect = shallow_rect.grow(DEEP_WIDTH)
 	for road: Dictionary in map_plan["roads"]:
@@ -135,6 +147,7 @@ func generate(new_seed_value: int = 104729) -> void:
 	for data in building_data:
 		_create_building(data)
 	_create_encounters(rng)
+	_apply_encounter_scaling()
 	_create_spawn_marker()
 
 
@@ -320,30 +333,34 @@ func _create_ground() -> void:
 	water_effects.name = "WaterEffects"
 	water_effects.setup(_materials["water"], land_rect, WATER_HEIGHT)
 	_generated.add_child(water_effects)
-	# Ramps follow actual road exits, with one additional entry per shore.
-	var exits: Array[Vector3] = [Vector3(0, 0, 50), Vector3(0, 0, -50), Vector3(50, 0, 0), Vector3(-50, 0, 0)]
+	# Ramps follow actual road exits, with one additional entry per shore. Every
+	# boundary value is derived from the current floor's land rectangle so a
+	# larger district keeps one walkable ramp at each exit instead of stacking
+	# 100-metre floor-one positions on top of each other.
+	var half_extent := map_size * 0.5
+	var exits: Array[Vector3] = [Vector3(0, 0, half_extent), Vector3(0, 0, -half_extent), Vector3(half_extent, 0, 0), Vector3(-half_extent, 0, 0)]
 	for road: Dictionary in road_data:
 		for point: Vector3 in road["ground_points"]:
-			if absf(absf(point.x) - 50.0) < 0.01 or absf(absf(point.z) - 50.0) < 0.01:
+			if absf(absf(point.x) - half_extent) < 0.01 or absf(absf(point.z) - half_extent) < 0.01:
 				exits.append(point)
 	for point in exits:
 		var yaw := 0.0
-		if absf(point.x - 50.0) < 0.01:
+		if absf(point.x - half_extent) < 0.01:
 			yaw = PI * 0.5
-		elif absf(point.x + 50.0) < 0.01:
+		elif absf(point.x + half_extent) < 0.01:
 			yaw = -PI * 0.5
 		elif point.z < 0.0:
 			yaw = PI
 		_create_shore_ramp(point, yaw)
 	# Non-solid short edge dashes distinguish the shelf without building a wall.
-	for index in range(22):
+	for index in range(maxi(1, int(map_size / 4.5))):
 		var along_x := land_rect.position.x + 2.0 + float(index) * 6.0
 		var along_z := land_rect.position.y + 2.0 + float(index) * 6.0
 		for sign_value in [-1.0, 1.0]:
 			if along_x <= land_rect.end.x - 1.0:
-				_box(_generated, "ShoreEdge", Vector3(2.5, 0.015, 0.20), Vector3(along_x, 0.011, sign_value * (LAND_HALF_EXTENT_Z - 0.13)), _materials["shore"])
+				_box(_generated, "ShoreEdge", Vector3(2.5, 0.015, 0.20), Vector3(along_x, 0.011, sign_value * (half_extent - 0.13)), _materials["shore"])
 			if along_z <= land_rect.end.y - 1.0:
-				_box(_generated, "ShoreEdge", Vector3(0.20, 0.015, 2.5), Vector3(sign_value * (LAND_HALF_EXTENT_X - 0.13), 0.011, along_z), _materials["shore"])
+				_box(_generated, "ShoreEdge", Vector3(0.20, 0.015, 2.5), Vector3(sign_value * (half_extent - 0.13), 0.011, along_z), _materials["shore"])
 
 
 func _create_streets() -> void:
@@ -656,7 +673,14 @@ func _create_encounters(rng: RandomNumberGenerator) -> void:
 				"endpoint_a": midpoint - direction * 5.5, "endpoint_b": midpoint + direction * 5.5,
 				"road_id": road["id"], "road_width": road["width"]})
 	_shuffle(candidates, rng)
-	var enemy_bag: Array[String] = ["sword", "boxer", "sniper", "sword", "boxer", "sniper", "sword", "boxer"]
+	# A larger floor has more usable road, so it can hold more encounters. The
+	# mix keeps the three archetypes in the same rotating order as floor one,
+	# which is what makes later streets read as "more of the same, tougher".
+	var wanted := _wanted_encounter_count()
+	var enemy_bag: Array[String] = []
+	while enemy_bag.size() < wanted:
+		enemy_bag.append_array(["sword", "boxer", "sniper"])
+	enemy_bag.resize(wanted)
 	_shuffle(enemy_bag, rng)
 	for candidate in candidates:
 		var separated := true
@@ -669,12 +693,31 @@ func _create_encounters(rng: RandomNumberGenerator) -> void:
 		data["id"] = encounters_data.size()
 		data["enemy_type"] = enemy_bag[encounters_data.size()]
 		encounters_data.append(data)
-		if encounters_data.size() == 8:
+		if encounters_data.size() == wanted:
 			break
 
 
+## Floor one keeps its eight encounters; a larger district scales the count with
+## its area so a bigger map is not mostly empty street, capped by the road
+## candidates that actually exist. The floor controller can override it before
+## `generate()` through `encounter_target`.
+func _wanted_encounter_count() -> int:
+	if encounter_target > 0:
+		return encounter_target
+	return maxi(8, int(round(8.0 * (map_size * map_size) / (MAP_SIZE * MAP_SIZE))))
+
+
+## Stamps the current floor's enemy multipliers on every generated encounter.
+## Reading them from the map keeps `street_encounter.gd` unaware of floors: it
+## only forwards the numbers it was given.
+func _apply_encounter_scaling() -> void:
+	for data: Dictionary in encounters_data:
+		data["enemy_health_multiplier"] = enemy_health_multiplier
+		data["enemy_damage_multiplier"] = enemy_damage_multiplier
+
+
 func _layout_point_to_world(point: Vector2) -> Vector3:
-	return Vector3(point.x - MAP_SIZE * 0.5, 0.0, MAP_SIZE * 0.5 - point.y)
+	return Vector3(point.x - map_size * 0.5, 0.0, map_size * 0.5 - point.y)
 
 
 func _world_polygon(polygon: PackedVector2Array) -> PackedVector2Array:

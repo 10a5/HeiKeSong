@@ -27,3 +27,15 @@
 .env.*
 !.env.example
 !.env.sample
+
+# --- Large binary assets not committed yet (kept out for repo size); ---
+# --- add them back per-pattern, ideally via Git LFS, when needed.      ---
+# NOTE: large assets already tracked by the shared repo are NOT listed here;
+#       they stay in git even though they are big.
+/学校.glb
+/弹珠楼.glb
+/_visual_check/ending_first_floor.avi
+/神社.glb
+/神社_神社_rm.png
+/学校_学校_basecolor.jpg
+/神社_神社_basecolor.jpg

@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://floor_three.gd" id="1_floor"]
+[ext_resource type="Script" path="res://player.gd" id="2_player"]
+
+[node name="ThirdFloor" type="Node3D"]
+script = ExtResource("1_floor")
+floor_index = 3
+
+[node name="Player" type="CharacterBody3D" parent="."]
+process_mode = 1
+position = Vector3(-12, 0, 60)
+script = ExtResource("2_player")
+bounds_enabled = false
+spawn_position = Vector3(-12, 0, 60)

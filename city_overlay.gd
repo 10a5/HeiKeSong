@@ -101,7 +101,7 @@ func _draw() -> void:
 	draw_rect(Rect2(0, 0, 960, 540), Color(0.015, 0.03, 0.05, 0.84))
 	draw_rect(PANEL, Color("0c1b28"))
 	draw_rect(PANEL, Color("395366"), false, 1)
-	_text(Vector2(204, 65), "第一层 · 城市街区", 21, TEXT)
+	_text(Vector2(204, 65), "%s · 城市街区" % _floor_label(), 21, TEXT)
 	_text(Vector2(514, 65), "种子 %d" % int(_controller.get("map_seed")), 10, MUTED)
 	draw_rect(CLOSE, Color("193346"))
 	draw_rect(CLOSE, Color("507184"), false, 1)
@@ -122,6 +122,7 @@ func _draw() -> void:
 	_text(Vector2(605, 344), "已清理遭遇", 12, TEXT)
 	draw_circle(Vector2(590, 367), 4, Color.WHITE)
 	_text(Vector2(605, 371), "当前位置", 12, TEXT)
+	_text(Vector2(584, 394), "隐形敌人显形后才标出位置", 11, MUTED)
 	_text(Vector2(584, 410), "浅水可站立", 11, Color("7cc8d9"))
 	_text(Vector2(584, 430), "深水会迷失", 11, DANGER)
 	_text(Vector2(204, 463), "查看期间暂停 · E 贴近建筑交互 · M / Esc 返回", 11, MUTED)
@@ -161,8 +162,11 @@ func _draw_city(rect: Rect2, expanded: bool) -> void:
 		for encounter in encounters:
 			if not is_instance_valid(encounter):
 				continue
+			var color := encounter_map_color(encounter)
+			# A fully transparent answer means "leave this encounter unplotted".
+			if color.a <= 0.0:
+				continue
 			var at: Vector3 = encounter.global_position
-			var color := TEAL if str(encounter.get("state")) == "cleared" else DANGER
 			draw_circle(_world_point(Vector2(at.x, at.z), rect, bounds), 3.5 if expanded else 1.8, color)
 	var player = _controller.get("player")
 	if is_instance_valid(player):
@@ -175,6 +179,25 @@ func _draw_city(rect: Rect2, expanded: bool) -> void:
 
 func _world_point(point: Vector2, rect: Rect2, bounds: Rect2) -> Vector2:
 	return rect.position + (point - bounds.position) / bounds.size * rect.size
+
+
+## "第一层" / "第二层" / "第三层" for the panel header. The floor controller owns
+## the label so the overlay never needs its own floor table.
+func _floor_label() -> String:
+	if is_instance_valid(_controller) and _controller.has_method("_district_short_name"):
+		return str(_controller.call("_district_short_name"))
+	return "第一层"
+
+
+## Dot colour for one encounter, or a transparent colour when it must not be
+## plotted at all. A concealed enemy opts out through `shows_on_city_map()`;
+## everything else keeps the two-state legend (unfinished / cleared).
+func encounter_map_color(encounter: Node) -> Color:
+	if not is_instance_valid(encounter):
+		return Color(0.0, 0.0, 0.0, 0.0)
+	if encounter.has_method("shows_on_city_map") and not bool(encounter.call("shows_on_city_map")):
+		return Color(0.0, 0.0, 0.0, 0.0)
+	return TEAL if str(encounter.get("state")) == "cleared" else DANGER
 
 
 func _world_rect(world: Rect2, rect: Rect2, bounds: Rect2) -> Rect2:

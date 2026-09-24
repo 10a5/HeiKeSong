@@ -8,11 +8,19 @@ const OVERLAY = preload("res://city_overlay.gd")
 const CATALOG = preload("res://card_catalog.gd")
 const EROSION = preload("res://erosion_system.gd")
 const BOSS_ARENA = preload("res://boss_arena.gd")
+const FLOOR_ENDING = preload("res://floor_ending.gd")
+const LEVELS = preload("res://level_stats.gd")
+
+## Which authored floor this scene plays. The subclass scenes set this before
+## `_ready()` runs; the value selects one row of `level_stats.gd`, which owns
+## the map size, street enemy scaling and Boss health for that floor.
+@export var floor_index: int = LEVELS.FLOOR_ONE
 
 var city_map: Node3D
 var services: Array[Node3D] = []
 var encounters: Array[Node3D] = []
 var city_overlay: Control
+var hud_canvas: CanvasLayer
 var credits: int = 40
 var map_seed: int = 0
 var water_zone: String = "land"
@@ -28,10 +36,25 @@ var _boss_transitioning := false
 var _boss_active := false
 var _boss_pending := false
 var _boss_transition_callback: Callable
+var _boss_victory_reached := false
+## The Boss-victory ending director (`floor_ending.gd`), live from the moment the
+## mirror falls until the next floor takes the tree.
+var ending
+## Destination streamed while the ending plays. Empty on the deepest floor, which
+## returns to the arena instead of changing scenes.
+var _ending_next_scene := ""
+## Duel-floor spawn captured before the arena sinks. The deepest floor hands the
+## player back here, and it has to be sampled while the floor is still standing:
+## a static body's transform change is not visible to a ray cast in the same frame.
+var _ending_arena_spawn := Vector3.ZERO
+## Set once the victory Matrix fade has covered the screen, so the scene switch
+## cannot run twice from a repeated death report.
+var _floor_complete := false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	floor_index = LEVELS.clamp_floor(floor_index)
 	_create_materials()
 	_create_environment()
 	deck = DECK_SCRIPT.new()
@@ -47,6 +70,7 @@ func _ready() -> void:
 	var canvas := CanvasLayer.new()
 	canvas.name = "HUD"
 	add_child(canvas)
+	hud_canvas = canvas
 	hud = HUD_SCRIPT.new()
 	hud.name = "Interface"
 	canvas.add_child(hud)
@@ -87,6 +111,13 @@ func _ready() -> void:
 	regenerate_floor()
 
 
+## One row of `level_stats.gd` for the floor this scene plays. Everything the
+## later floors change (map size, street stats, Boss pool, reward scale) is read
+## from here, so a new floor is a scene plus one table row.
+func _floor_config() -> Dictionary:
+	return LEVELS.config(floor_index)
+
+
 func _create_environment() -> void:
 	super._create_environment()
 	# A cloudy sky supplies broad reflections even on the Compatibility renderer.
@@ -117,6 +148,9 @@ func _create_environment() -> void:
 
 
 func regenerate_floor(seed_value: int = -1) -> void:
+	# A retry must be able to interrupt the victory ending, which owns the
+	# camera, the environment and a hidden HUD while it plays.
+	_abort_boss_ending()
 	# R/N may interrupt the Boss Matrix fade before its one-shot `covered`
 	# callback runs. Disconnect it before reusing the same HUD transition node.
 	if is_instance_valid(hud) and is_instance_valid(hud.matrix_transition):
@@ -125,6 +159,7 @@ func regenerate_floor(seed_value: int = -1) -> void:
 			effect.covered.disconnect(_boss_transition_callback)
 		effect.stop()
 	_boss_transition_callback = Callable()
+	_floor_complete = false
 	if is_instance_valid(boss_arena):
 		boss_arena.queue_free()
 		boss_arena = null
@@ -132,6 +167,7 @@ func regenerate_floor(seed_value: int = -1) -> void:
 	_boss_transitioning = false
 	_boss_active = false
 	_boss_pending = false
+	_boss_victory_reached = false
 	if is_instance_valid(erosion):
 		erosion.reset()
 	if is_instance_valid(reward_flow):
@@ -164,9 +200,17 @@ func regenerate_floor(seed_value: int = -1) -> void:
 	encounters.clear()
 	if is_instance_valid(city_map):
 		city_map.free()
+	var config := _floor_config()
 	city_map = CITY.new()
 	city_map.name = "GeneratedDistrict"
 	add_child(city_map)
+	# The floor table drives the district, not the map class: the same growth
+	# algorithm produces a longer, denser street grid and tougher residents on
+	# later floors while the first floor keeps its original numbers.
+	city_map.map_size = float(config.get("map_size", 100.0))
+	city_map.enemy_health_multiplier = float(config.get("street_enemy_health", 1.0))
+	city_map.enemy_damage_multiplier = float(config.get("street_enemy_damage", 1.0))
+	city_map.encounter_target = int(config.get("encounter_count", 8))
 	city_map.generate(map_seed)
 	for data: Dictionary in city_map.building_data:
 		var building := BUILDING.new()
@@ -174,7 +218,7 @@ func regenerate_floor(seed_value: int = -1) -> void:
 		add_child(building)
 		building.setup(data, player, deck, self)
 		services.append(building)
-	credits = 40
+	credits = int(config.get("starting_credits", 40))
 	for data: Dictionary in city_map.encounters_data:
 		var encounter := ENCOUNTER.new()
 		encounter.name = "StreetEncounter%d" % encounters.size()
@@ -207,14 +251,22 @@ func regenerate_floor(seed_value: int = -1) -> void:
 	_configure_floor_hud()
 	_light_update_left = 0.0
 	_update_window_lights()
-	player.status_changed.emit("第一层 · 沿街探索，E 交互", false)
+	player.status_changed.emit("%s · 沿街探索，E 交互" % _district_short_name(), false)
+
+
+## "第一层" / "第二层" / "第三层" without the district suffix, for status lines.
+func _district_short_name() -> String:
+	var district := LEVELS.district_title(floor_index)
+	var separator := district.find(" · ")
+	return district.substr(0, separator) if separator > 0 else district
 
 
 func _configure_floor_hud() -> void:
-	hud.set_location("神经断层", "第一层 · 水岸街区", "R  重试本图")
+	var config := _floor_config()
+	hud.set_location(str(config.get("title", "神经断层")), LEVELS.district_title(floor_index), "R  重试本图")
 	hud.card_browser.discovery_hint = "商店 / 工厂 / 公安局"
 	hud.get_node("pause_hint").text = "ESC 继续 / R 重试 / N 新地图"
-	hud.set_defeat_text("探索失败 · 按 R 重试", "N 生成新的第一层")
+	hud.set_defeat_text("探索失败 · 按 R 重试", "N 生成新的%s" % _district_short_name())
 
 
 func restart() -> void:
@@ -226,6 +278,7 @@ func _physics_process(delta: float) -> void:
 		return
 	super._physics_process(delta)
 	_maybe_start_boss_transition()
+	_check_boss_victory()
 	if is_instance_valid(erosion) and not _boss_transitioning:
 		var moving := Vector2(player.velocity.x, player.velocity.z).length() > 0.05
 		erosion.set_combat_active(_is_in_combat())
@@ -289,16 +342,17 @@ func encounter_cleared(encounter: Node = null) -> void:
 	if not is_instance_valid(encounter) or encounter not in encounters or encounter.get_meta("reward_granted", false):
 		return
 	encounter.set_meta("reward_granted", true)
-	add_credits(15)
+	var encounter_credits := int(_floor_config().get("encounter_credits", 15))
+	add_credits(encounter_credits)
 	if is_instance_valid(reward_flow):
 		var reward_seed := map_seed + cleared_encounters() * 9176 + 29
 		if is_instance_valid(encounter) and encounter.data.has("id"):
 			reward_seed = map_seed + int(encounter.data["id"]) * 9176 + 29
 		reward_flow.enqueue_reward("enemy", reward_flow.make_random_reward(reward_seed))
 	if cleared_encounters() == encounters.size():
-		message("第一层街道已清理 · 金币 +15")
+		message("%s街道已清理 · 金币 +%d" % [_district_short_name(), encounter_credits])
 	else:
-		message("街道已清理 · 金币 +15")
+		message("街道已清理 · 金币 +%d" % encounter_credits)
 
 
 func try_interact() -> bool:
@@ -355,6 +409,12 @@ func unlock_next_card() -> String:
 
 
 func _input(event: InputEvent) -> void:
+	# The ending owns the frame while it plays: any key or click cuts the
+	# collapse short, and R still restarts the floor.
+	if is_instance_valid(ending) and _ending_allows_skip(event):
+		ending.skip()
+		get_viewport().set_input_as_handled()
+		return
 	if is_instance_valid(reward_flow) and reward_flow.is_open():
 		super._input(event)
 		return
@@ -509,6 +569,10 @@ func _on_boss_transition_covered() -> void:
 			var foe: Variant = encounter.get("foe")
 			if is_instance_valid(foe):
 				foe.set_physics_process(false)
+	# Street threats are parked for the duel, so their prompts must not linger
+	# over the arena: a frozen foe never gets another frame to retire them.
+	if is_instance_valid(player) and player.has_method("clear_threat_warnings"):
+		player.clear_threat_warnings()
 	if is_instance_valid(city_map):
 		city_map.visible = false
 	for light in _window_lights:
@@ -516,6 +580,10 @@ func _on_boss_transition_covered() -> void:
 	boss_arena = BOSS_ARENA.new()
 	boss_arena.name = "BossArena"
 	boss_arena.position = Vector3(0.0, 32.0, 0.0)
+	# Later floors use the same duel with a thicker mirror health pool and
+	# harder-hitting mirror combos; every telegraph and card effect is unchanged.
+	if boss_arena.has_method("set_floor_scaling"):
+		boss_arena.set_floor_scaling(float(_floor_config().get("boss_health_multiplier", 1.0)), float(_floor_config().get("boss_damage_multiplier", 1.0)))
 	add_child(boss_arena)
 	_finish_boss_load.call_deferred()
 
@@ -538,6 +606,7 @@ func _finish_boss_load() -> void:
 		boss_brain.attach_opponent(boss_target)
 	_boss_active = true
 	_boss_transitioning = false
+	_boss_victory_reached = false
 	paused = false
 	get_tree().paused = false
 	erosion.set_paused(false)
@@ -551,6 +620,138 @@ func _on_boss_erosion_depleted() -> void:
 	if not _boss_active:
 		return
 	# Reaching zero ends the drain, not the duel. Keep the Boss active so the
-	# player can still finish the encounter; a later victory rule can consume
+	# player can still finish the encounter; the victory check below consumes
 	# this signal without changing the timer itself.
 	message("侵蚀耗尽 · 决战继续", false)
+
+
+## Victory rule. Beating the mirror Boss is what moves the run onward: the duel
+## arena collapses, 素子 falls into the flooded basin, 雾子 is seen floating from
+## above under the mirror quote, and a digital shop gate covers the switch to the
+## next floor while that floor streams in. Floor one fades into floor two, floor
+## two into floor three, and the last floor returns to its own arena. This is
+## checked from the physics frame instead of a signal so it also works for a Boss
+## that died to an area attack during its own entrance.
+func _check_boss_victory() -> void:
+	if not _boss_active or _boss_victory_reached or _floor_complete:
+		return
+	if not is_instance_valid(boss_target) or not bool(boss_target.get("is_dead")):
+		return
+	_boss_victory_reached = true
+	message("镜像 Boss 已击败", false)
+	_begin_boss_ending(LEVELS.next_floor(floor_index))
+
+
+## Hands the frame to the ending director. The tree is paused here, exactly as it
+## is for the two Matrix hand-offs, so gameplay nodes hold still while the
+## director animates the collapse itself.
+func _begin_boss_ending(next_floor_index: int) -> void:
+	if _floor_complete or is_instance_valid(ending):
+		return
+	paused = true
+	get_tree().paused = true
+	_orbiting = false
+	if is_instance_valid(erosion):
+		erosion.set_paused(true)
+	if is_instance_valid(hud):
+		hud.set_boss_target(null)
+		hud.set_location("断层崩塌", "水面协议 · 意识下潜", "")
+	if is_instance_valid(player) and player.has_method("clear_threat_warnings"):
+		player.clear_threat_warnings()
+	var advances := next_floor_index > floor_index
+	var next_scene := LEVELS.scene_path(next_floor_index) if advances else ""
+	var next_title := LEVELS.district_title(next_floor_index) if advances else "%s 已清理" % _district_short_name()
+	if is_instance_valid(boss_arena):
+		_ending_arena_spawn = boss_arena.player_spawn()
+	_ending_next_scene = next_scene
+	ending = FLOOR_ENDING.new()
+	ending.name = "FloorEnding"
+	add_child(ending)
+	ending.completed.connect(_on_boss_ending_completed)
+	ending.setup({
+		"floor": self,
+		"arena": boss_arena,
+		"player": player,
+		"boss": boss_target,
+		"camera": camera,
+		"hud": hud,
+		"canvas": hud_canvas,
+		"next_scene": next_scene,
+		"next_title": next_title,
+	})
+	# Stream the destination while the player watches the quote, so the gate at
+	# the end of the sequence is a cache hit rather than a load screen.
+	ending.request_scene_load(next_scene)
+	ending.start()
+
+
+func _on_boss_ending_completed() -> void:
+	if _floor_complete:
+		return
+	if _ending_next_scene.is_empty():
+		_resume_after_ending()
+		return
+	_advance_now()
+
+
+## The deepest floor has nowhere to go, so the ending restores the arena and hands
+## control back instead of changing scenes.
+func _resume_after_ending() -> void:
+	# The duel floor sank during the ending, so the spawn is the one sampled
+	# before the collapse: a ray cast would still see the sunken plate this frame.
+	_abort_boss_ending()
+	_ending_next_scene = ""
+	_boss_active = false
+	_boss_victory_reached = true
+	paused = false
+	get_tree().paused = false
+	if is_instance_valid(erosion):
+		erosion.set_paused(false)
+	var arena_spawn := _ending_arena_spawn
+	if arena_spawn == Vector3.ZERO:
+		arena_spawn = player.global_position
+	player.spawn_position = arena_spawn
+	player.reset_player()
+	camera_yaw = DEFAULT_YAW
+	camera_pitch = 0.93
+	camera_distance = 30.0
+	player.movement_yaw = camera_yaw
+	_camera_target = player.global_position + Vector3.UP * 0.65
+	_update_camera()
+	if is_instance_valid(hud):
+		hud.set_boss_target(null)
+		hud.set_location("断层深处", "%s · 已清理" % _district_short_name(), "R  重置本图")
+		message("%s已清理 · 这是目前最深的一层" % _district_short_name(), false)
+
+
+## Frees the ending director and restores whatever it borrowed from the floor.
+func _abort_boss_ending() -> void:
+	if is_instance_valid(ending):
+		ending.restore()
+		ending.queue_free()
+	ending = null
+
+
+## The ending swallows any key or click as "skip the collapse"; R keeps its
+## escape hatch so a live demo can always reset the floor.
+func _ending_allows_skip(event: InputEvent) -> bool:
+	if event is InputEventKey:
+		return event.pressed and not event.echo and event.keycode != KEY_R and event.physical_keycode != KEY_R
+	if event is InputEventMouseButton:
+		return event.pressed
+	if event is InputEventScreenTouch:
+		return event.pressed
+	return false
+
+
+## Scene switch after the ending's digital gate has covered the screen: the swap
+## itself is invisible, so this is only a pause release plus `change_scene`.
+func _advance_now() -> void:
+	var next_scene := _ending_next_scene
+	if next_scene.is_empty() or _floor_complete:
+		return
+	_floor_complete = true
+	_ending_next_scene = ""
+	get_tree().paused = false
+	get_tree().change_scene_to_file(next_scene)
+

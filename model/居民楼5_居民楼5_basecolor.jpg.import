@@ -3,9 +3,10 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cdg8kavt4ygrv"
-path="res://.godot/imported/居民楼5_居民楼5_basecolor.jpg-bfe1778a3ebce2e001a65aad1579db86.ctex"
+path.s3tc="res://.godot/imported/居民楼5_居民楼5_basecolor.jpg-bfe1778a3ebce2e001a65aad1579db86.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "f63d73c9a0962efb6b1b9cdbd63e9f67"
@@ -14,11 +15,11 @@ generator_parameters={
 [deps]
 
 source_file="res://model/居民楼5_居民楼5_basecolor.jpg"
-dest_files=["res://.godot/imported/居民楼5_居民楼5_basecolor.jpg-bfe1778a3ebce2e001a65aad1579db86.ctex"]
+dest_files=["res://.godot/imported/居民楼5_居民楼5_basecolor.jpg-bfe1778a3ebce2e001a65aad1579db86.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +41,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

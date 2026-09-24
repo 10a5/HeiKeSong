@@ -11,6 +11,10 @@ signal health_changed(current: float, maximum: float)
 signal shield_changed(current: float)
 signal damaged(amount: float)
 signal defeated()
+## Persistent danger prompts reported by world actors, for example entering a
+## concealed sniper's firing range. Aggregated so the HUD always shows the most
+## recent reporter and clears only when every source has stood down.
+signal threat_changed(message: String, active: bool)
 
 const COMBAT = preload("res://combat_hit.gd")
 const CARD_CATALOG = preload("res://card_catalog.gd")
@@ -116,6 +120,9 @@ var _active_melee_half_angle: float = deg_to_rad(65.0)
 var _active_melee_vertical_reach: float = 1.1
 var _roll_attack_used: bool = false
 var _action_effects: Array[Dictionary] = []
+## Node -> active prompt message. Kept as an ordered dictionary so the newest
+## reporter owns the displayed line.
+var _threat_sources: Dictionary = {}
 var facing: Vector3 = Vector3.FORWARD
 var _visual_yaw: float = 0.0
 var is_rolling: bool = false
@@ -196,6 +203,42 @@ func get_attack_damage(base_damage: float) -> float:
 	return base_damage * implant_damage_multiplier
 
 
+## A world actor registers or clears a persistent danger prompt here. Re-adding
+## the same source refreshes its message; the newest active source is the one
+## the HUD shows.
+func set_threat_warning(source: Node, message: String, active: bool) -> void:
+	if not is_instance_valid(source):
+		return
+	var previous := active_threat_message()
+	if active:
+		_threat_sources.erase(source)
+		_threat_sources[source] = message
+	else:
+		_threat_sources.erase(source)
+	var current := active_threat_message()
+	if current == previous:
+		return
+	threat_changed.emit(current, not current.is_empty())
+
+
+## The message of the most recently registered active threat, or "" when clear.
+## Freed reporters are pruned here so a despawned actor cannot pin a prompt.
+func active_threat_message() -> String:
+	for source in _threat_sources.keys():
+		if not is_instance_valid(source):
+			_threat_sources.erase(source)
+			continue
+		return String(_threat_sources[source])
+	return ""
+
+
+func clear_threat_warnings() -> void:
+	if _threat_sources.is_empty():
+		return
+	_threat_sources.clear()
+	threat_changed.emit("", false)
+
+
 func reset_player() -> void:
 	set_physics_process(true)
 	_action_visual_token += 1
@@ -235,6 +278,7 @@ func reset_player() -> void:
 	_cybernetic_trail_clock = 0.0
 	_dash_slash_started = false
 	_slash_is_dash = false
+	clear_threat_warnings()
 	for echo in _trail:
 		if is_instance_valid(echo["node"]):
 			echo["node"].queue_free()
@@ -912,6 +956,7 @@ func take_damage(amount: float, ignore_damage_reduction: bool = false) -> bool:
 		cybernetic_time_left = 0.0
 		velocity.x = 0.0
 		velocity.z = 0.0
+		clear_threat_warnings()
 		cybernetic_changed.emit(cybernetic_time_left, cybernetic_cooldown_left)
 	if applied > 0.0:
 		health_changed.emit(health, max_health)
