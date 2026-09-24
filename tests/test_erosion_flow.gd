@@ -160,12 +160,67 @@ func _test_boss_transition_and_intro() -> void:
 	paused = false
 	var intro_done := await _wait_until(func() -> bool: return not boss.is_entering, 240)
 	_check(intro_done, "The Boss entrance shield ends after its bounded three-second window")
+	await _test_adaptive_runtime(boss)
 
 	# Boss erosion drains while combat is active and remains a stable zero; the
 	# floor does not silently end the duel when the timer is depleted.
 	erosion.value = 2
 	floor_scene._physics_process(2.0)
 	_check(erosion.value == 0 and bool(floor_scene.get("_boss_active")), "Boss erosion drains to zero without ending the active duel")
+
+
+func _test_adaptive_runtime(boss: Node) -> void:
+	var runtime: Node = floor_scene.adaptive_runtime
+	_check(is_instance_valid(runtime) and bool(runtime.get("active")), "Adaptive runtime activates after the Boss hand-off")
+	if not is_instance_valid(runtime):
+		return
+	var observer: Node = runtime.get("observer")
+	_check(is_instance_valid(observer) and observer.get("target") == boss, "Gameplay observer follows the actual final Boss")
+	var context: Dictionary = runtime.build_context()
+	var model: Variant = context.get("world_model", {})
+	var opponent: Variant = context.get("opponent", {})
+	_check(model is Dictionary and (model as Dictionary).has("gameplay") and opponent is Dictionary, "LLM context contains gameplay world model and opponent state")
+	runtime.record_jump(true)
+	runtime.record_jump(false)
+	context = runtime.build_context()
+	var gameplay: Dictionary = (context["world_model"] as Dictionary)["gameplay"]
+	_check(int(gameplay.get("jumps", {}).get("accepted", 0)) == 1 and int(gameplay.get("jumps", {}).get("rejected", 0)) == 1, "Runtime forwards jump outcomes to the gameplay observer")
+	_check(not context.has("hand") and not context.has("deck") and not context.has("key"), "LLM context excludes hand, deck, and API key fields")
+	_check(JSON.stringify(context).to_utf8_buffer().size() < 65536, "LLM context stays within the bridge size limit")
+	var bridge: Node = runtime.get("llm_bridge")
+	if FileAccess.file_exists("res://key.txt"):
+		_check(is_instance_valid(bridge) and bool(bridge.call("is_configured")), "key.txt configures the live bridge without exposing the token")
+
+	# Feed a repeated roll -> slash habit through the same public player signal
+	# used during real card play. Pause while injecting the samples so the
+	# integration test does not move the actual actor or spend a real card.
+	floor_scene.paused = true
+	paused = true
+	for _i in range(6):
+		player.energy = 10.0
+		player.action_played.emit("roll", 3.0)
+		player.energy = 8.0
+		player.action_played.emit("slash", 2.0)
+	var learned: Dictionary = floor_scene.boss_brain.snapshot()
+	_check(int(learned.get("patterns", {}).get("roll_count", 0)) == 6 and str(learned.get("recommended_response", "")) == "evade_roll_then_punish", "Boss world model learns the repeated roll-to-attack habit")
+	floor_scene.paused = false
+	paused = false
+
+	# Keep a real rolling state long enough for the local adapter and reaction FSM
+	# to run. No network request is needed for this fallback-path assertion.
+	player.energy = 8.0
+	player.is_rolling = true
+	player.roll_time_left = 0.40
+	var reaction_seen := false
+	for _i in range(36):
+		await _steps(1)
+		if str(boss.get("adaptive_reaction")) == "evade":
+			reaction_seen = true
+			break
+	_check(str(floor_scene.boss_brain.strategy.get("roll_response", "")) == "evade", "Local strategy adapter authorizes the learned roll response")
+	_check(reaction_seen, "Reaction FSM intent reaches the live Boss controller")
+	player.is_rolling = false
+	player.roll_time_left = 0.0
 
 
 func _test_boss_r_retry() -> void:

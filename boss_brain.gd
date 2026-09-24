@@ -35,10 +35,10 @@ var player: Node
 var opponent: Node
 var world_model: Dictionary = {}
 var strategy: Dictionary = {
-	"name": "baseline_observer",
+	"name": "observe_and_probe",
 	"aggression": 0.5,
 	"exploration_rate": 0.2,
-	"roll_response": "evade",
+	"roll_response": "disengage",
 	"slash_response": "guard",
 	"dash_response": "sidestep",
 }
@@ -69,8 +69,11 @@ var _was_attached := false
 func _ready() -> void:
 	# The brain is allowed to observe while a scene is paused.  Its reaction
 	# callback should still check the boss/player gameplay pause state before
-	# applying any actual attack.
-	process_mode = Node.PROCESS_MODE_ALWAYS
+	# applying any actual attack. Preserve an explicit caller choice (the live
+	# game sets PROCESS_MODE_PAUSABLE); standalone lab scenes default to ALWAYS
+	# so their asynchronous observation harness keeps working while paused.
+	if process_mode == Node.PROCESS_MODE_INHERIT:
+		process_mode = Node.PROCESS_MODE_ALWAYS
 	_reset_model()
 
 
@@ -154,6 +157,11 @@ func _disconnect_player_signals(actor: Node) -> void:
 
 
 func reset_observation() -> void:
+	strategy = {
+		"name": "observe_and_probe", "aggression": 0.5, "exploration_rate": 0.2,
+		"roll_response": "disengage", "slash_response": "guard", "dash_response": "sidestep",
+	}
+	roll_attack_threshold = 0.42
 	_reset_model()
 	_clock = 0.0
 	_sample_clock = 0.0
@@ -186,14 +194,20 @@ func plan_reaction(player_state_override: Dictionary = {}) -> Dictionary:
 		"player_state": state,
 		"world_model": world_model.duplicate(true),
 	}
+	if bool(state.get("is_dead", false)):
+		return {"reaction": &"observe", "payload": payload}
 	if bool(state.get("is_rolling", false)):
 		var can_afford_attack := float(state.get("energy", 0.0)) >= predicted_attack_cost
 		var roll_samples := int(patterns.get("roll_count", 0))
 		var enough_evidence := roll_samples >= 3 and float(world_model.get("confidence", 0.0)) >= 0.4
 		if enough_evidence and float(patterns.get("roll_attack_rate", 0.0)) >= roll_attack_threshold and can_afford_attack:
-			requested = &"evade"
-			payload["reason"] = "predicted_roll_attack"
-			payload["punish_after"] = "roll_recovery"
+			# Evidence alone must not bypass the slow strategy layer. The
+			# strategy (local rule or LLM directive) authorizes the response.
+			requested = StringName(str(strategy.get("roll_response", "disengage")))
+			payload["reason"] = "predicted_roll_attack" if requested == &"evade" else "policy_roll_response"
+			payload["policy"] = str(strategy.get("name", "observe_and_probe"))
+			if requested == &"evade":
+				payload["punish_after"] = "roll_recovery"
 		elif can_afford_attack:
 			requested = &"disengage"
 			payload["reason"] = "unknown_roll_intent"
@@ -250,7 +264,7 @@ func _empty_summary() -> Dictionary:
 		"outcomes": {},
 		"attempts": {"accepted": 0, "rejected": 0, "rejection_rate": 0.0},
 		"state": {},
-		"recommended_response": "observe",
+		"recommended_response": "observe_and_probe",
 	}
 
 
@@ -396,6 +410,7 @@ func _state_snapshot() -> Dictionary:
 		"energy": _read_float("energy", 0.0),
 		"max_energy": _read_float("max_energy", 0.0),
 		"health": _read_float("health", 0.0),
+		"slash_time_left": _read_float("slash_time_left", 0.0),
 		"position": pos_data,
 		"velocity": velocity_data,
 		"roll_direction": roll_data,
@@ -420,6 +435,10 @@ func _infer_world_model() -> void:
 	var total_weight := 0.0
 	var weighted_actions: Dictionary = {}
 	var weighted_categories: Dictionary = {"attack": 0.0, "movement": 0.0, "hybrid": 0.0, "unknown": 0.0}
+	var weighted_roll_count := 0.0
+	var weighted_roll_attack_count := 0.0
+	var previous_kind := ""
+	var previous_time := -INF
 	var commitment_sum := 0.0
 	var commitment_weight := 0.0
 	var weighted_energy_bands: Dictionary = {"0_2": 0.0, "3_7": 0.0, "8_10": 0.0}
@@ -433,6 +452,15 @@ func _infer_world_model() -> void:
 		weighted_actions[kind] = float(weighted_actions.get(kind, 0.0)) + weight
 		weighted_categories[category] = float(weighted_categories.get(category, 0.0)) + weight
 		total_weight += weight
+		if kind == "roll":
+			weighted_roll_count += weight
+		var current_time := float(action.get("time", _clock))
+		var action_elapsed := current_time - previous_time if is_finite(previous_time) else -1.0
+		if previous_kind == "roll" and action_elapsed >= 0.0 and action_elapsed <= pattern_window:
+			if CARD_CATALOG.category(kind) == "attack" or CARD_CATALOG.category(kind) == "hybrid":
+				weighted_roll_attack_count += weight
+		previous_kind = kind
+		previous_time = current_time
 		var energy_max := float(action.get("energy_before", 0.0))
 		if energy_max > 0.0:
 			commitment_sum += minf(float(action.get("cost", 0.0)) / energy_max, 1.0) * weight
@@ -470,16 +498,20 @@ func _infer_world_model() -> void:
 	var event_total := 0
 	for event_name in _event_counts:
 		event_total += int(_event_counts[event_name])
-	summary["confidence"] = clampf(float(_action_history.size()) / 12.0, 0.0, 1.0)
+	# Evidence confidence follows the same recency half-life as action weights;
+	# an old habit therefore fades before the 40-action buffer is replaced.
+	summary["confidence"] = clampf(total_weight / 12.0, 0.0, 1.0)
 	summary["dominant_action"] = dominant_action
 	summary["dominant_category"] = dominant_category
 	summary["action_counts"] = _action_counts.duplicate(true)
 	summary["category_mix"] = normalized_categories
 	summary["top_transitions"] = top_transitions
 	summary["patterns"] = {
-		"roll_attack_rate": float(roll_attack_count) / maxf(float(roll_count), 1.0),
+		"roll_attack_rate": weighted_roll_attack_count / maxf(weighted_roll_count, 0.001),
 		"roll_attack_count": roll_attack_count,
 		"roll_count": roll_count,
+		"weighted_roll_count": weighted_roll_count,
+		"weighted_roll_attack_count": weighted_roll_attack_count,
 		"hybrid_rate": float(normalized_categories.get("hybrid", 0.0)),
 		"burst_rate": float(burst_count) / maxf(float(event_total), 1.0),
 	}
@@ -557,13 +589,13 @@ func apply_llm_directive(directive: Dictionary) -> bool:
 			continue
 		strategy[key] = value
 		changed = true
-	if directive.has("aggression"):
+	if _finite_number(directive.get("aggression")):
 		strategy["aggression"] = clampf(float(directive["aggression"]), 0.0, 1.0)
 		changed = true
-	if directive.has("exploration_rate"):
+	if _finite_number(directive.get("exploration_rate")):
 		strategy["exploration_rate"] = clampf(float(directive["exploration_rate"]), 0.0, 0.35)
 		changed = true
-	if directive.has("roll_attack_threshold"):
+	if _finite_number(directive.get("roll_attack_threshold")):
 		roll_attack_threshold = clampf(float(directive["roll_attack_threshold"]), 0.1, 0.95)
 		changed = true
 	if changed:
@@ -571,9 +603,13 @@ func apply_llm_directive(directive: Dictionary) -> bool:
 	return changed
 
 
+func _finite_number(value: Variant) -> bool:
+	return (value is int or value is float) and is_finite(float(value))
+
+
 func _strategy_value_allowed(key: String, value: String) -> bool:
 	if key == "name":
-		return not value.is_empty() and value.length() <= 64
+		return not value.is_empty() and value.length() <= 64 and not value.contains("\n") and not value.contains("\r")
 	var allowed := {
 		"roll_response": ["evade", "disengage", "guard", "pressure"],
 		"slash_response": ["guard", "evade", "disengage", "pressure"],
@@ -583,7 +619,7 @@ func _strategy_value_allowed(key: String, value: String) -> bool:
 
 
 func get_llm_context() -> Dictionary:
-	## Stable interface for a future local/server LLM adapter.  Do not pass the
+	## Stable interface for the optional local/server LLM adapter. Do not pass the
 	## entire action log; the compact summary limits leakage and token growth.
 	return {
 		"world_model": world_model.duplicate(true),
@@ -595,13 +631,16 @@ func get_llm_context() -> Dictionary:
 func _evaluate_reaction(immediate: bool) -> void:
 	if not is_instance_valid(player):
 		return
-	if not immediate and _clock - last_reaction_time < reaction_cooldown:
-		return
 	var decision := plan_reaction()
 	var requested: StringName = decision["reaction"]
 	var payload: Dictionary = decision["payload"]
+	var within_cooldown := _clock - last_reaction_time < reaction_cooldown
+	# A card signal can request an urgent state change immediately, while
+	# physics ticks coalesce noisy repeats under the local FSM cooldown.
+	if within_cooldown and (not immediate or requested == last_reaction):
+		return
 	_set_reaction_state(requested)
-	if immediate or requested != last_reaction:
+	if requested != last_reaction:
 		last_reaction = requested
 		last_reaction_time = _clock
 		reaction_requested.emit(requested, payload)

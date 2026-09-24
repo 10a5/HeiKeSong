@@ -5,7 +5,6 @@ extends "res://player.gd"
 ## the energy reserved for its final retreat.
 
 signal dodge_observed()
-signal attack_observed(kind: String, hit: bool, damage: float)
 signal combo_started(combo_name: StringName)
 signal combo_finished(combo_name: StringName)
 
@@ -73,6 +72,14 @@ var active_combo: StringName = &""
 var shield_cooldown_left: float = 0.0
 var adaptive_reaction: StringName = &"observe"
 var adaptive_reaction_payload: Dictionary = {}
+## The adaptive brain supplies bounded intents; these fields keep the intent
+## inside the Boss's local FSM instead of letting a network response mutate
+## movement or damage directly.
+var adaptive_reaction_time_left: float = 0.0
+var adaptive_reaction_count: int = 0
+var _adaptive_move_mode: StringName = &""
+var _adaptive_move_time_left: float = 0.0
+var _adaptive_reaction_pending: bool = false
 
 var _actor: CharacterBody3D
 var _ai_direction: Vector3 = Vector3.ZERO
@@ -176,6 +183,11 @@ func reset_enemy() -> void:
 	_distance_mode = 0
 	adaptive_reaction = &"observe"
 	adaptive_reaction_payload.clear()
+	adaptive_reaction_time_left = 0.0
+	adaptive_reaction_count = 0
+	_adaptive_move_mode = &""
+	_adaptive_move_time_left = 0.0
+	_adaptive_reaction_pending = false
 	if is_instance_valid(_actor):
 		facing = _direction_to_actor()
 		_visual_yaw = _direction_yaw(facing)
@@ -184,10 +196,24 @@ func reset_enemy() -> void:
 
 
 func apply_adaptive_reaction(reaction: StringName, payload: Dictionary = {}) -> void:
-	# Keep the later LLM/FSM hook observable without silently replacing these
-	# three authored behaviours with a different adaptive combat policy.
+	# This is the boundary between the brain's reaction FSM and the authored
+	# combat controller. Only a small, local intent is retained; the payload is
+	# telemetry and never contains executable instructions or damage values.
 	adaptive_reaction = reaction
 	adaptive_reaction_payload = payload.duplicate(true)
+	adaptive_reaction_time_left = 0.65 if reaction != &"observe" else 0.0
+	adaptive_reaction_count += 1 if reaction != &"observe" else 0
+	_adaptive_reaction_pending = reaction != &"observe"
+	if reaction == &"disengage" or reaction == &"sidestep":
+		_adaptive_move_mode = reaction
+		_adaptive_move_time_left = 0.55
+	elif reaction == &"pressure":
+		_adaptive_move_mode = &"pressure"
+		_adaptive_move_time_left = 0.55
+	elif reaction == &"observe":
+		_adaptive_move_mode = &""
+		_adaptive_move_time_left = 0.0
+		_adaptive_reaction_pending = false
 
 
 func desired_distance() -> float:
@@ -288,6 +314,7 @@ func _advance_entrance(delta: float) -> void:
 
 
 func _update_ai(delta: float) -> void:
+	adaptive_reaction_time_left = maxf(0.0, adaptive_reaction_time_left - delta)
 	if combo_active:
 		_ai_direction = Vector3.ZERO
 		if state == &"windup":
@@ -304,6 +331,29 @@ func _update_ai(delta: float) -> void:
 			else:
 				_begin_step_windup()
 		return
+	# Reactions are consumed at the same boundary as any other Boss FSM input.
+	# They can request a defensive card, or bias the next recovery movement;
+	# they cannot interrupt an already committed combo or alter hit resolution.
+	if _adaptive_reaction_pending and not is_action_locked():
+		_adaptive_reaction_pending = false
+		if adaptive_reaction == &"evade" and energy + 0.00001 >= get_card_cost("roll"):
+			var away := -_direction_to_actor()
+			if away.is_zero_approx():
+				away = -facing
+			facing = away.normalized()
+			_ai_direction = Vector3.ZERO
+			if request_card("roll"):
+				state = &"adaptive_evade"
+				_recovery_left = maxf(_recovery_left, 0.22)
+				state_time_left = _recovery_left
+				return
+		elif adaptive_reaction == &"guard" and energy + 0.00001 >= get_card_cost("shield") and shield < shield_trigger_below:
+			if request_card("shield"):
+				shield_cooldown_left = shield_cooldown
+				state = &"shield"
+				_recovery_left = maxf(_recovery_left, 0.18)
+				state_time_left = _recovery_left
+				return
 	var previous_energy := energy
 	energy = minf(max_energy, energy + energy_regen_per_second * delta)
 	if not is_equal_approx(previous_energy, energy):
@@ -460,6 +510,23 @@ func _update_recovery_movement(delta: float) -> void:
 	var offset := _horizontal_actor_offset()
 	var distance := offset.length()
 	var toward := offset.normalized() if distance > 0.01 else facing
+	if _adaptive_move_time_left > 0.0 and not toward.is_zero_approx():
+		_adaptive_move_time_left = maxf(0.0, _adaptive_move_time_left - delta)
+		var adaptive_direction := Vector3.ZERO
+		if _adaptive_move_mode == &"disengage":
+			adaptive_direction = -toward
+		elif _adaptive_move_mode == &"pressure":
+			adaptive_direction = toward
+		elif _adaptive_move_mode == &"sidestep":
+			adaptive_direction = toward.cross(Vector3.UP) * _strafe_sign
+		if not adaptive_direction.is_zero_approx():
+			adaptive_direction = adaptive_direction.normalized()
+			if _can_traverse(adaptive_direction, maxf(0.30, move_speed * delta + radius)):
+				_ai_direction = adaptive_direction
+				facing = adaptive_direction
+				return
+	if _adaptive_move_time_left <= 0.0:
+		_adaptive_move_mode = &""
 	var desired := desired_distance()
 	var tolerance := maxf(0.1, distance_tolerance)
 	# Hysteresis keeps a tiny position change at the preferred radius from

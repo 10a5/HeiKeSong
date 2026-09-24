@@ -50,6 +50,9 @@ func _run() -> void:
 	_check(int(patterns["roll_attack_count"]) == 6, "world model counts roll to attack chains")
 	_check(float(patterns["roll_attack_rate"]) > 0.99, "world model estimates the learned roll attack rate")
 	_check(str(summary["recommended_response"]) == "evade_roll_then_punish", "world model recommends the roll counter")
+	# The adaptive lab keeps the slow strategy layer between evidence and the
+	# reaction FSM. Authorize the counter explicitly before inspecting the plan.
+	_check(brain.apply_llm_directive({"name": "test_roll_counter", "roll_response": "evade"}), "strategy layer authorizes the learned counter")
 
 	var high_energy_plan: Dictionary = brain.plan_reaction({"is_rolling": true, "energy": 8.0})
 	_check(str(high_energy_plan["reaction"]) == "evade", "FSM evades a learned roll plus affordable follow-up attack")

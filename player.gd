@@ -5,6 +5,10 @@ extends CharacterBody3D
 signal energy_changed(current: float, maximum: float)
 signal action_played(action_name: String, cost: float)
 signal action_attempted(action_name: String, accepted: bool, reason: String)
+## Emitted once for each resolved attack that hits (and for instantaneous
+## attacks that resolve without a target). The adaptive observer consumes this
+## public result; combat damage remains locally authoritative.
+signal attack_observed(kind: String, hit: bool, damage: float)
 signal status_changed(message: String, is_error: bool)
 signal cybernetic_changed(active_time_left: float, cooldown_left: float)
 signal health_changed(current: float, maximum: float)
@@ -100,6 +104,7 @@ var _shield_decay_elapsed: float = 0.0
 var is_dead: bool = false
 var _damage_flash_left: float = 0.0
 var _slash_targets_hit: Array[int] = []
+var _attack_observed_emitted := false
 var _buffered_card: String = ""
 var combo_window_left: float = 0.0
 var _slash_is_combo: bool = false
@@ -249,6 +254,7 @@ func reset_player() -> void:
 	is_dead = false
 	_damage_flash_left = 0.0
 	_slash_targets_hit.clear()
+	_attack_observed_emitted = false
 	_buffered_card = ""
 	combo_window_left = 0.0
 	_slash_is_combo = false
@@ -273,6 +279,7 @@ func reset_player() -> void:
 	front_kick_damage_delay_left = 0.0
 	front_kick_damage_fired = false
 	_dash_targets_hit.clear()
+	_attack_observed_emitted = false
 	cybernetic_time_left = 0.0
 	cybernetic_cooldown_left = 0.0
 	_cybernetic_trail_clock = 0.0
@@ -564,6 +571,9 @@ func request_card(kind: String) -> bool:
 		facing = direction
 	energy -= cost
 	_action_visual_token += 1
+	# Each accepted card starts a fresh combat observation window. Dash and dive
+	# keep this flag across their internal movement/impact phases below.
+	_attack_observed_emitted = false
 	energy_changed.emit(energy, max_energy)
 	var chained := combo_window_left > 0.0 or slash_time_left > 0.0 or is_rolling
 	# Movement cards may cancel a heavy windup or a previous swing's recovery.
@@ -617,6 +627,7 @@ func request_card(kind: String) -> bool:
 			_begin_air_move(direction, 9.4, 0.16)
 			_spawn_ring(Color("62ddff"), 0.7, 0.20)
 		"dash_slash":
+			_attack_observed_emitted = false
 			dash_direction = direction
 			is_dashing = true
 			dash_time_left = dash_duration
@@ -635,6 +646,7 @@ func request_card(kind: String) -> bool:
 			_begin_air_move(direction, 7.0, 0.18)
 			_start_melee(direction, kind, airborne_slash_damage, 2.1, 0.18, slash_half_angle, 1.65)
 		"dive_slash":
+			_attack_observed_emitted = false
 			is_diving = true
 			dive_direction = direction
 			air_move_time_left = 0.0
@@ -682,7 +694,10 @@ func can_chain_card(kind: String) -> bool:
 func _start_slash_visual(direction: Vector3, from_dash: bool, combo: bool = false) -> void:
 	_slash_is_combo = combo and not from_dash
 	var duration := 0.24 if from_dash else (combo_slash_duration if _slash_is_combo else slash_visual_duration)
-	_start_melee(direction, "dash_slash" if from_dash else "slash", dash_slash_damage if from_dash else slash_damage, dash_slash_reach if from_dash else slash_reach, duration, slash_half_angle, melee_vertical_reach)
+	# A dash can already have hit during its swept movement. Preserve that
+	# observation when the follow-up visual hit window starts so one card is
+	# reported once to the adaptive observer.
+	_start_melee(direction, "dash_slash" if from_dash else "slash", dash_slash_damage if from_dash else slash_damage, dash_slash_reach if from_dash else slash_reach, duration, slash_half_angle, melee_vertical_reach, not from_dash)
 	if from_dash:
 		# Preserve path hits when the follow-up punch window begins so a target
 		# crossed during the dash cannot be damaged a second time at the endpoint.
@@ -691,7 +706,9 @@ func _start_slash_visual(direction: Vector3, from_dash: bool, combo: bool = fals
 				_slash_targets_hit.append(target_id)
 
 
-func _start_melee(direction: Vector3, kind: String, damage: float, reach: float, duration: float, half_angle: float, vertical_reach: float) -> void:
+func _start_melee(direction: Vector3, kind: String, damage: float, reach: float, duration: float, half_angle: float, vertical_reach: float, reset_observation: bool = true) -> void:
+	if reset_observation:
+		_attack_observed_emitted = false
 	var preserved_dash_hits: Array[int] = []
 	if kind == "dash_slash":
 		for target_id in _dash_targets_hit:
@@ -742,10 +759,14 @@ func _apply_slash_hits() -> void:
 		if target_id in _slash_targets_hit:
 			continue
 		if COMBAT.can_hit(self, target, slash_direction, _active_melee_reach, _active_melee_half_angle, _active_melee_vertical_reach):
+			var health_before := float(target.get("health"))
 			if bool(target.call("take_damage", get_attack_damage(_active_melee_damage))):
 				_slash_targets_hit.append(target_id)
 				if _active_attack_kind == "dash_slash" and target_id not in _dash_targets_hit:
 					_dash_targets_hit.append(target_id)
+				if not _attack_observed_emitted:
+					attack_observed.emit(_active_attack_kind, true, maxf(0.0, health_before - float(target.get("health"))))
+					_attack_observed_emitted = true
 	if _active_attack_kind == "front_kick":
 		front_kick_damage_fired = true
 
@@ -780,8 +801,12 @@ func _apply_dash_path_hits(previous_position: Vector3) -> void:
 		ray.exclude = exclusions
 		if not get_world_3d().direct_space_state.intersect_ray(ray).is_empty():
 			continue
+		var health_before := float(target.get("health"))
 		if bool(target.call("take_damage", get_attack_damage(dash_slash_damage))):
 			_dash_targets_hit.append(target_id)
+			if not _attack_observed_emitted:
+				_attack_observed_emitted = true
+				attack_observed.emit("dash_slash", true, maxf(0.0, health_before - float(target.get("health"))))
 
 
 func _update_charge(delta: float) -> void:
@@ -798,6 +823,8 @@ func _update_charge(delta: float) -> void:
 func _fire_shot(direction: Vector3) -> void:
 	var origin := global_position + Vector3.UP * 0.9
 	var end := origin + direction * shot_range
+	var landed := false
+	var damage_applied := 0.0
 	# The nearest collision wins: world geometry blocks opponents behind it.
 	var query := PhysicsRayQueryParameters3D.create(origin, end, 1 | 4)
 	query.exclude = [get_rid()]
@@ -807,7 +834,12 @@ func _fire_shot(direction: Vector3) -> void:
 		end = hit["position"]
 		var target: Object = hit["collider"]
 		if is_instance_valid(target) and target.has_method("take_damage"):
-			target.call("take_damage", get_attack_damage(shot_damage))
+			var health_before := float(target.get("health"))
+			landed = bool(target.call("take_damage", get_attack_damage(shot_damage)))
+			damage_applied = maxf(0.0, health_before - float(target.get("health")))
+	if not _attack_observed_emitted:
+		attack_observed.emit("shot", landed, damage_applied)
+		_attack_observed_emitted = true
 	var length := origin.distance_to(end)
 	if length <= 0.001:
 		return
@@ -852,7 +884,11 @@ func _advance_dive(delta: float) -> void:
 		for target in get_tree().get_nodes_in_group("combat_targets"):
 			if target is Node3D and target.has_method("take_damage"):
 				if COMBAT.can_hit(self, target, dive_direction, dive_radius, PI, 1.3):
-					target.call("take_damage", get_attack_damage(dive_slash_damage))
+					var health_before := float(target.get("health"))
+					if bool(target.call("take_damage", get_attack_damage(dive_slash_damage))):
+						if not _attack_observed_emitted:
+							attack_observed.emit("dive_slash", true, maxf(0.0, health_before - float(target.get("health"))))
+							_attack_observed_emitted = true
 		_spawn_ring(Color("ce8bff"), dive_radius, 0.20)
 		combo_window_left = combo_window_duration
 		jet_jump_used = false
@@ -892,6 +928,7 @@ func _clear_extra_actions() -> void:
 	_roll_attack_used = false
 	_dash_targets_hit.clear()
 	_active_attack_kind = "slash"
+	_attack_observed_emitted = false
 	for effect in _action_effects:
 		if is_instance_valid(effect["node"]):
 			effect["node"].queue_free()

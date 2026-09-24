@@ -8,6 +8,7 @@ const OVERLAY = preload("res://city_overlay.gd")
 const CATALOG = preload("res://card_catalog.gd")
 const EROSION = preload("res://erosion_system.gd")
 const BOSS_ARENA = preload("res://boss_arena.gd")
+<<<<<<< HEAD
 const FLOOR_ENDING = preload("res://floor_ending.gd")
 const LEVELS = preload("res://level_stats.gd")
 
@@ -15,6 +16,9 @@ const LEVELS = preload("res://level_stats.gd")
 ## `_ready()` runs; the value selects one row of `level_stats.gd`, which owns
 ## the map size, street enemy scaling and Boss health for that floor.
 @export var floor_index: int = LEVELS.FLOOR_ONE
+=======
+const ADAPTIVE_RUNTIME = preload("res://adaptive_boss_runtime.gd")
+>>>>>>> ed32262 (9:01)
 
 var city_map: Node3D
 var services: Array[Node3D] = []
@@ -36,6 +40,7 @@ var _boss_transitioning := false
 var _boss_active := false
 var _boss_pending := false
 var _boss_transition_callback: Callable
+<<<<<<< HEAD
 var _boss_victory_reached := false
 ## The Boss-victory ending director (`floor_ending.gd`), live from the moment the
 ## mirror falls until the next floor takes the tree.
@@ -50,6 +55,9 @@ var _ending_arena_spawn := Vector3.ZERO
 ## Set once the victory Matrix fade has covered the screen, so the scene switch
 ## cannot run twice from a repeated death report.
 var _floor_complete := false
+=======
+var adaptive_runtime: Node
+>>>>>>> ed32262 (9:01)
 
 
 func _ready() -> void:
@@ -82,6 +90,11 @@ func _ready() -> void:
 	hud.browser_requested.connect(open_card_browser)
 	hud.browser_close_requested.connect(close_card_browser)
 	_setup_adaptive_brain()
+	adaptive_runtime = ADAPTIVE_RUNTIME.new()
+	adaptive_runtime.name = "AdaptiveBossRuntime"
+	add_child(adaptive_runtime)
+	adaptive_runtime.setup(player, boss_brain)
+	adaptive_runtime.status_changed.connect(_on_adaptive_runtime_status)
 	_setup_reward_flow(canvas)
 	city_overlay = OVERLAY.new()
 	city_overlay.name = "CityOverlay"
@@ -148,9 +161,14 @@ func _create_environment() -> void:
 
 
 func regenerate_floor(seed_value: int = -1) -> void:
+<<<<<<< HEAD
 	# A retry must be able to interrupt the victory ending, which owns the
 	# camera, the environment and a hidden HUD while it plays.
 	_abort_boss_ending()
+=======
+	if is_instance_valid(adaptive_runtime):
+		adaptive_runtime.reset_run()
+>>>>>>> ed32262 (9:01)
 	# R/N may interrupt the Boss Matrix fade before its one-shot `covered`
 	# callback runs. Disconnect it before reusing the same HUD transition node.
 	if is_instance_valid(hud) and is_instance_valid(hud.matrix_transition):
@@ -604,13 +622,15 @@ func _finish_boss_load() -> void:
 	boss_target = boss_arena.spawn_boss(player)
 	if is_instance_valid(boss_brain) and boss_brain.has_method("attach_opponent"):
 		boss_brain.attach_opponent(boss_target)
+	if is_instance_valid(adaptive_runtime):
+		adaptive_runtime.attach_boss(boss_target, true)
 	_boss_active = true
 	_boss_transitioning = false
 	_boss_victory_reached = false
 	paused = false
 	get_tree().paused = false
 	erosion.set_paused(false)
-	hud.set_location("决战协议", "镜像 Boss · 观察并适应你的连招", "R  重置决战")
+	hud.set_location("决战协议", "世界模型 → LLM → 反应 FSM", "R  重置决战")
 	hud.set_boss_target(boss_target)
 	hud.set_erosion_state(erosion.value, erosion.max_value, true, "Boss 战 · 每秒 −1")
 	hud.matrix_transition.play_out(0.42)
@@ -625,6 +645,7 @@ func _on_boss_erosion_depleted() -> void:
 	message("侵蚀耗尽 · 决战继续", false)
 
 
+<<<<<<< HEAD
 ## Victory rule. Beating the mirror Boss is what moves the run onward: the duel
 ## arena collapses, 素子 falls into the flooded basin, 雾子 is seen floating from
 ## above under the mirror quote, and a digital shop gate covers the switch to the
@@ -755,3 +776,12 @@ func _advance_now() -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file(next_scene)
 
+=======
+func _on_adaptive_runtime_status(message_text: String) -> void:
+	if not _boss_active or message_text.is_empty():
+		return
+	# Keep network diagnostics short and visible without replacing the combat
+	# HUD. The full status and model summary remain available on the runtime.
+	if message_text.contains("LLM") or message_text.contains("策略") or message_text.contains("失败"):
+		message("自适应 Boss · " + message_text, false)
+>>>>>>> ed32262 (9:01)

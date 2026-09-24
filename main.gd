@@ -27,8 +27,9 @@ var shop_panel: Control
 var reward_flow: Node
 var inventory: Node
 var enemy: CharacterBody3D
-## The adaptive brain is telemetry + bounded planning only. A future final boss
-## can consume its reaction_requested signal without putting an LLM in combat.
+## The adaptive brain is telemetry + bounded planning only. The final Boss
+## runtime may consume its reaction_requested signal without putting an LLM in
+## the real-time hit, damage, or card-resolution path.
 var boss_brain: Node
 var unlock_terminals: Array = []
 var camera: Camera3D
@@ -94,7 +95,10 @@ func _physics_process(_delta: float) -> void:
 			deck.play_slot(slot)
 			break
 	if Input.is_action_just_pressed("jump"):
-		player.request_jump()
+		var jump_accepted: bool = bool(player.request_jump())
+		var runtime := get_node_or_null("AdaptiveBossRuntime")
+		if is_instance_valid(runtime) and runtime.has_method("record_jump"):
+			runtime.record_jump(jump_accepted)
 	if Input.is_action_just_pressed("interact"):
 		try_interact()
 
@@ -250,7 +254,12 @@ func _setup_adaptive_brain() -> void:
 		return
 	boss_brain = BOSS_BRAIN_SCRIPT.new()
 	boss_brain.name = "AdaptiveBossBrain"
+	# Observation and the local FSM follow gameplay pause state. Network
+	# transport is owned by the adaptive runtime and remains asynchronous.
 	add_child(boss_brain)
+	# Set this after add_child(): boss_brain.gd initializes its own defaults in
+	# _ready(), and would otherwise overwrite the gameplay pause policy.
+	boss_brain.process_mode = Node.PROCESS_MODE_PAUSABLE
 	boss_brain.attach_player(player)
 	boss_brain.reaction_requested.connect(_on_adaptive_reaction)
 	if is_instance_valid(enemy) and boss_brain.has_method("attach_opponent"):
@@ -258,6 +267,12 @@ func _setup_adaptive_brain() -> void:
 
 
 func _on_adaptive_reaction(reaction: StringName, payload: Dictionary) -> void:
+	# The first-floor runtime owns the final Boss hand-off. Keep this legacy
+	# training-enemy hook connected for the default chamber, but avoid applying
+	# one reaction twice when AdaptiveBossRuntime is active.
+	var runtime := get_node_or_null("AdaptiveBossRuntime")
+	if is_instance_valid(runtime) and bool(runtime.get("active")):
+		return
 	# Keep the current training foe deterministic. The hook is ready for the
 	# future Mirror controller, which can implement apply_adaptive_reaction().
 	var reaction_target: Node = enemy

@@ -178,11 +178,11 @@ godot --path .
 
 ## 自适应 Boss 行为分析原型
 
-项目已经接入一个离线、可解释的三层原型，默认场景和第一层都会自动创建 `AdaptiveBossBrain`。它只观察已经发生的动作和公开状态，不读取玩家手牌、抽牌堆或未来随机数。
+项目已经接入一个可解释的三层运行时，默认场景和第一层都会自动创建 `AdaptiveBossBrain`；第一层 Boss 战还会启动异步 LLM 桥接。它只观察已经发生的动作和公开状态，不读取玩家手牌、抽牌堆或未来随机数。
 
 1. **世界模型**：记录最近 40 张成功打出的牌，并单独记录失败尝试；以 8 秒半衰期统计动作类别、连招转移（例如 `roll->slash`）、能量投入区间、距离分桶和当前状态。
-2. **策略层**：`get_llm_context()` 输出紧凑摘要。未来接入 LLM 时，只允许通过 `apply_llm_directive()` 修改白名单策略和数值；LLM 不参与实时命中、伤害、抽牌或胜负。
-3. **反应状态机**：每个物理帧执行 `plan_reaction()`。当已经有足够样本确认玩家常在翻滚后接攻击，且当前能量足够时，会发出 `reaction_requested("evade", payload)`，并附带可解释原因。Boss 控制器可把它转成闪避、延迟攻击或封位。
+2. **策略层**：`adaptive_boss_runtime.gd` 低频发送 `get_llm_context()` 的紧凑摘要。EvoMap 或其它兼容服务只能通过 `apply_llm_directive()` 修改白名单策略和数值；LLM 不参与实时命中、伤害、抽牌或胜负，网络失败时回退到本地规则。
+3. **反应状态机**：每个物理帧执行 `plan_reaction()`。当已经有足够样本确认玩家常在翻滚后接攻击，且当前能量足够时，会按当前策略发出 `reaction_requested("evade"/"disengage", payload)`，并附带可解释原因。Boss 控制器可把它转成闪避、延迟攻击或封位。
 
 训练场中的敌人目前只保存这个意图，不改变原有固定行为，因此不会破坏现有战斗基线。接口和设计说明见 [docs/adaptive-boss.md](docs/adaptive-boss.md)，独立契约测试见 `tests/test_boss_brain.gd`。
 
@@ -205,6 +205,10 @@ godot --path .
 | `character_animation_lab/` | 独立骨骼拖拽、AnimationPlayer 时间轴与动作导出工作台 |
 | `enemy.gd` | 训练敌人、生命、追击、抬手预告、劈砍与收招 |
 | `boss_brain.gd` | 玩家行为世界模型、有限策略摘要与低延迟反应状态机 |
+| `adaptive_boss_runtime.gd` | Boss 战的世界模型 → LLM → 本地反应 FSM 接线与生命周期 |
+| `llm_bridge.gd` | 异步 OpenAI-compatible 请求、EvoMap 默认配置与响应白名单校验 |
+| `gameplay_observer.gd` | 最近 60 秒移动、跳跃、距离和攻击结果摘要 |
+| `strategy_adapter.gd` | 没有有效模型回复时的本地有限策略 |
 | `docs/adaptive-boss.md` | 自适应 Boss 三层架构和接入说明 |
 | `combat_hit.gd` | 近战距离、角度、高度及障碍遮挡判定 |
 | `hud.gd` | 生命、受伤/死亡反馈、四手牌、牌堆、义体状态与动作反馈 |
@@ -228,11 +232,15 @@ godot --path .
 | `tests/test_unlocks.gd` | 场景交互、解锁守恒、R 保留进度和扩展牌组循环 |
 | `tests/test_new_actions.gd` | 新动作伤害、碰撞、空中联动与状态清理 |
 | `tests/test_boss_brain.gd` | 玩家行为画像、连招识别、反应规划和 LLM 白名单测试 |
+<<<<<<< HEAD
 | `tests/test_tutorial.gd` | 教学关五个步骤、拳击手教学对手、教学手牌冻结补牌、战斗缓冲与奖励面板抑制检查 |
 | `tests/test_tutorial_exit.gd` | 教学关真实跳转：交接到第一层场景并运行 `floor_one.gd` |
 | `tests/test_floor_progression.gd` | 二、三层的更大地图、更高敌人数值与更厚 Boss 血量，以及第一层数值不变的回归检查 |
 | `tests/test_floor_ending.gd` | 胜利演出的台词、阶段推进、暂停与 HUD 交接、R 中断还原与真实切换进第二层 |
 | `tools/_ending_check.gd` | 打一场真实决战并逐阶段截取演出画面（写入 `_visual_check/`） |
+=======
+| `tests/test_llm_bridge.gd` | 回环 HTTP、key_file、取消、超时与模型响应校验 |
+>>>>>>> ed32262 (9:01)
 | `启动Demo.command` | macOS 启动入口 |
 | `.gitignore` | 忽略 Godot 导入缓存与本地生成文件 |
 | `Godot最小动作卡牌Demo指南.md` | 本次最小 Demo 的原始要求 |
@@ -289,7 +297,11 @@ macOS 未配置命令行时，可把上述 `godot` 替换为 `/Applications/Godo
 
 ## 当前范围
 
+<<<<<<< HEAD
 已实现 3D 灰盒场地、可操作相机、角色移动与平滑转身、跳跃与垂直运动、障碍物碰撞、十三种动作的可解锁随机牌库、四手牌、场景记忆终端、翻滚同时攻击与空中连段、“爆发加速”初始义体，以及一个可战斗的训练敌人、双方生命、真实近战命中、翻滚避伤、暂停和重置。三层楼层的决战场共用同一段收尾演出：决战场崩塌、素子坠入水下、镜头切到水面正上方看仰面漂着的雾子并浮出“你我犹如隔镜视物，所见无非虚幻迷蒙”，最后数码化的商店闸门吞掉整屏并在下一层加载完成后切换场景。当前已加入自适应 Boss 的离线行为分析与本地反应原型；角色使用新版模型中的 `front_kick_02` 回旋踢动作，运行时仍保留缺失素材时的兼容占位逻辑；最终 Boss 的具体招式、奖励、存档和 LLM 台词层仍未接入。
+=======
+已实现 3D 灰盒场地、可操作相机、角色移动与平滑转身、跳跃与垂直运动、障碍物碰撞、十三种动作的可解锁随机牌库、四手牌、场景记忆终端、翻滚同时攻击与空中连段、“爆发加速”初始义体，以及一个可战斗的训练敌人、双方生命、真实近战命中、翻滚避伤、暂停和重置。最终 Boss 现在接入了世界模型、低频 EvoMap 策略摘要和本地反应状态机；没有网络或密钥时自动使用本地规则。角色使用新版模型中的 `front_kick_02` 回旋踢动作，运行时仍保留缺失素材时的兼容占位逻辑；幻境、奖励和存档仍未接入。
+>>>>>>> ed32262 (9:01)
 
 本版本验证基础交战和躲避节奏，不据此宣称战斗乐趣或数值平衡已通过玩家测试。
 # HeiKeSong
